@@ -19,6 +19,8 @@ dist/
 
 # Model files
 *.task
+*.task
+*.tflite
 
 # IDE
 .vscode/

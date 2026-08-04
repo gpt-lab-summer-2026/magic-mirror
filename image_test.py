@@ -6,7 +6,7 @@ from mediapipe.tasks.python.vision import drawing_styles
 from mediapipe.tasks.python import vision
 import cv2
 
-# This code draws pose landmarks on a singular image, download an image and save it as "image.jpg" in the same directory as this script to run this example.
+# This code draws pose landmarks on a singular image, use a test pose image from the test-images folder.
 
 # Create an PoseLandmarker object.
 base_options = python.BaseOptions(model_asset_path='pose_landmarker.task')
@@ -35,7 +35,7 @@ def draw_landmarks_on_image(rgb_image, detection_result):
 
 
 # Load the input image.
-image = mp.Image.create_from_file("image.jpg")
+image = mp.Image.create_from_file("test-images/dynamic_pose.jpeg")
 
 # Detect pose landmarks from the input image.
 detection_result = detector.detect(image)

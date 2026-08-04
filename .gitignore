@@ -28,6 +28,9 @@ dist/
 .DS_Store
 Thumbs.db
 
+
 # Local files to ignore
 ignore/
 CLAUDE.md
+
+test-images-output/

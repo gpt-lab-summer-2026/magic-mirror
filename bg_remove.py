@@ -16,4 +16,5 @@ def remove_background_from_folder(folder_path, output_folder):
                 output = remove(input, session=session)
                 o.write(output)
 
-remove_background_from_folder('test-images', 'test-images-output')
+
+# remove_background_from_folder('test-images', 'test-images-output')

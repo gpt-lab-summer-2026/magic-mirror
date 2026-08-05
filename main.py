@@ -109,14 +109,14 @@ with PoseLandmarker.create_from_options(options) as landmarker:
     # swap the order above if you'd rather see the skeleton on top instead.
     if garment is not None and result_to_draw is not None and result_to_draw.pose_landmarks:
       h, w = display_frame.shape[:2]
-      body_points = garment_overlay.get_body_triangle(
+      body_points = garment_overlay.get_body_points(
           result_to_draw.pose_landmarks[0], w, h)
 
       if body_points is not None:
         smoothed_points = smoother.update(body_points)
         display_frame = garment_overlay.warp_and_blend(display_frame, garment, smoothed_points)
-      # else: landmarks not confident enough this frame — keep showing the
-      # last blended position implicitly, by just not updating this frame.
+      # else: landmarks not confident enough this frame — this frame simply
+      # doesn't get a new overlay drawn onto it.
     # ------------------------
 
     cv2.putText(display_frame, "press i to process image and q to quit", (10, 30),

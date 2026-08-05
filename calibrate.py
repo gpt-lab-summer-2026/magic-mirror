@@ -1,14 +1,22 @@
 """
 One-time calibration tool.
 
-Click 3 points on a background-removed garment image, in this exact order:
-  1. Left shoulder  (the wearer's left shoulder)
-  2. Right shoulder (the wearer's right shoulder)
-  3. Hip center      (roughly where the hips would sit, centered horizontally)
+Click points on a background-removed garment image, in this exact order
+(defined once, in garment_overlay.POINT_NAMES, so this file and the runtime
+overlay can never disagree about ordering):
+  1. Left shoulder
+  2. Right shoulder
+  3. Hip center   (roughly where the hips would sit, centered horizontally)
+  4. Left elbow
+  5. Right elbow
+  6. Left wrist
+  7. Right wrist
 
-These three points become the "src" side of the affine transform used every
-frame to warp the garment onto the tracked body. The order matters — it must
-match the order the body-side triangle is built in (see garment_overlay.py).
+These become the "src" side of the affine fit used every frame to warp the
+garment onto the tracked body. At runtime, whichever of these points has a
+currently-visible match on the body (shoulders + hip-center are always
+required; elbows/wrists are used opportunistically) get fed into a
+least-squares affine solve.
 
 Saves a sidecar JSON next to the image: <name>.anchors.json
 
@@ -18,7 +26,7 @@ Usage:
 Controls:
     click   - place the next point
     u       - undo last point
-    s       - save (once all 3 points are placed)
+    s       - save (once all points are placed)
     q       - quit without saving
 """
 import sys
@@ -28,8 +36,17 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-POINT_NAMES = ["left_shoulder", "right_shoulder", "hip_center"]
-POINT_COLORS = [(0, 200, 255), (255, 200, 0), (0, 255, 0)]  # BGR, one per point
+from garment_overlay import POINT_NAMES
+
+POINT_COLORS = [
+    (0, 200, 255),    # left_shoulder - orange
+    (255, 200, 0),    # right_shoulder - cyan
+    (0, 255, 0),      # hip_center - green
+    (255, 0, 255),    # left_elbow - magenta
+    (0, 128, 255),    # right_elbow - amber
+    (255, 255, 0),    # left_wrist - yellow
+    (128, 0, 255),    # right_wrist - purple
+]
 
 
 def _composite_on_checkerboard(rgba, square=16):
@@ -58,10 +75,10 @@ def calibrate(image_path: str) -> dict:
     points = []
 
     def on_mouse(event, x, y, flags, userdata):
-        if event == cv2.EVENT_LBUTTONDOWN and len(points) < 3:
+        if event == cv2.EVENT_LBUTTONDOWN and len(points) < len(POINT_NAMES):
             points.append((x, y))
 
-    window_name = "Calibration - click left shoulder, right shoulder, hip center (u=undo, s=save, q=quit)"
+    window_name = "Calibration - click each point in order (u=undo, s=save, q=quit)"
     cv2.namedWindow(window_name)
     cv2.setMouseCallback(window_name, on_mouse)
 
@@ -73,7 +90,7 @@ def calibrate(image_path: str) -> dict:
             cv2.putText(frame, POINT_NAMES[i], (px + 8, py - 8),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-        next_label = POINT_NAMES[len(points)] if len(points) < 3 else "all points set - press s to save"
+        next_label = POINT_NAMES[len(points)] if len(points) < len(POINT_NAMES) else "all points set - press s to save"
         cv2.putText(frame, f"click: {next_label}", (10, 25),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
@@ -83,9 +100,9 @@ def calibrate(image_path: str) -> dict:
         if key == ord('u') and points:
             points.pop()
         elif key == ord('s'):
-            if len(points) == 3:
+            if len(points) == len(POINT_NAMES):
                 break
-            print("Need exactly 3 points before saving.")
+            print(f"Need all {len(POINT_NAMES)} points before saving ({len(points)} placed so far).")
         elif key == ord('q'):
             cv2.destroyAllWindows()
             sys.exit("Calibration cancelled.")

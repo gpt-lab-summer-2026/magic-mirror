@@ -29,9 +29,7 @@ def remove_background_from_image(input_path, output_folder):
             o.write(output)
 
     return output_path
-    
+
 
 # remove_background_from_folder('test-images', 'test-images-output')
-print("test:")
-print(remove_background_from_image('test-images/bg_white_top.png', 'test-images-output'))
-print("end")
+# print(remove_background_from_image('test-images/bg_white_top.png', 'test-images-output'))

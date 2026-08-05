@@ -7,6 +7,7 @@ from mediapipe.tasks.python.vision import drawing_utils
 from mediapipe.tasks.python.vision import drawing_styles
 import cv2
 import numpy as np
+import bg_remove
 
 model_path = 'pose_landmarker_full.task'
 
@@ -19,6 +20,7 @@ VisionRunningMode = mp.tasks.vision.RunningMode
 latest_result = None
 latest_result_lock = threading.Lock()
 
+test_image = 'test-images/bg_white_top.png'
 
 def draw_landmarks_on_image(rgb_image, detection_result):
   annotated_image = np.copy(rgb_image)
@@ -80,7 +82,17 @@ with PoseLandmarker.create_from_options(options) as landmarker:
     else:
       annotated_frame = numpy_frame_from_opencv
 
-    cv2.imshow('Webcam', cv2.cvtColor(annotated_frame, cv2.COLOR_RGB2BGR))
+    display_frame = cv2.cvtColor(annotated_frame, cv2.COLOR_RGB2BGR)
+    cv2.putText(display_frame, "press i to process image and q to quit", (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    cv2.imshow('Webcam', display_frame)
+
+    # Check for user input for the test image or quit the application
+    if cv2.waitKey(1) & 0xFF == ord('i'):
+      print("Removing background from test image...")
+      no_bg_image_path = bg_remove.remove_background_from_image(test_image, 'test-images-output')
+      print(f"Background removed image saved at: {no_bg_image_path}")
+          
     if cv2.waitKey(1) & 0xFF == ord('q'):
       break
 

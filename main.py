@@ -8,6 +8,7 @@ from mediapipe.tasks.python.vision import drawing_styles
 import cv2
 import numpy as np
 import bg_remove
+import garment_overlay
 
 model_path = 'pose_landmarker_full.task'
 
@@ -21,6 +22,13 @@ latest_result = None
 latest_result_lock = threading.Lock()
 
 test_image = 'test-images/bg_white_top.png'
+
+# Once you've run bg_remove on a garment and then calibrate.py on the result,
+# point this at the resulting .out.png (it looks for a matching
+# .anchors.json saved right next to it). Until that file + its calibration
+# exist, the overlay is simply skipped and the app behaves as before.
+GARMENT_PATH = 'test-images-output/bg_white_top.out.png'
+
 
 def draw_landmarks_on_image(rgb_image, detection_result):
   annotated_image = np.copy(rgb_image)
@@ -48,6 +56,18 @@ options = PoseLandmarkerOptions(
     base_options=BaseOptions(model_asset_path=model_path),
     running_mode=VisionRunningMode.LIVE_STREAM,
     result_callback=store_result)
+
+# Try to load a calibrated garment at startup.
+try:
+    garment = garment_overlay.Garment(GARMENT_PATH)
+    print(f"Loaded garment: {GARMENT_PATH}", flush=True)
+except FileNotFoundError as e:
+    garment = None
+    print(f"No garment loaded yet ({e})", flush=True)
+    print("Press 'i' to background-remove the test image, then run "
+          f"'python calibrate.py <output path>' on it, then restart.", flush=True)
+
+smoother = garment_overlay.LandmarkSmoother(alpha=0.4)
 
 with PoseLandmarker.create_from_options(options) as landmarker:
   # Use OpenCV's VideoCapture to start capturing from the webcam.
@@ -83,6 +103,22 @@ with PoseLandmarker.create_from_options(options) as landmarker:
       annotated_frame = numpy_frame_from_opencv
 
     display_frame = cv2.cvtColor(annotated_frame, cv2.COLOR_RGB2BGR)
+
+    # --- garment overlay ---
+    # Runs after landmark drawing so the garment sits on top of the frame;
+    # swap the order above if you'd rather see the skeleton on top instead.
+    if garment is not None and result_to_draw is not None and result_to_draw.pose_landmarks:
+      h, w = display_frame.shape[:2]
+      body_points = garment_overlay.get_body_triangle(
+          result_to_draw.pose_landmarks[0], w, h)
+
+      if body_points is not None:
+        smoothed_points = smoother.update(body_points)
+        display_frame = garment_overlay.warp_and_blend(display_frame, garment, smoothed_points)
+      # else: landmarks not confident enough this frame — keep showing the
+      # last blended position implicitly, by just not updating this frame.
+    # ------------------------
+
     cv2.putText(display_frame, "press i to process image and q to quit", (10, 30),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
     cv2.imshow('Webcam', display_frame)
@@ -92,7 +128,8 @@ with PoseLandmarker.create_from_options(options) as landmarker:
       print("Removing background from test image...")
       no_bg_image_path = bg_remove.remove_background_from_image(test_image, 'test-images-output')
       print(f"Background removed image saved at: {no_bg_image_path}")
-          
+      print(f"Now run: python calibrate.py {no_bg_image_path}")
+
     if cv2.waitKey(1) & 0xFF == ord('q'):
       break
 

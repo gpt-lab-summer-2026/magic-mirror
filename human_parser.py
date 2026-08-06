@@ -1,10 +1,9 @@
-"""FASHN Human Parser, shared by the scripts that need a class map.
+"""FASHN Human Parser: SegFormer-B4, 18 classes, 384x576 input.
 
-SegFormer-B4, 18 classes, 384x576 input. First use downloads ~244 MB from HuggingFace.
+First use downloads ~244 MB from HuggingFace.
 """
 
 import cv2
-import numpy as np
 import torch
 from transformers import SegformerImageProcessor, SegformerForSemanticSegmentation
 
@@ -16,21 +15,21 @@ def load_parser():
     processor = SegformerImageProcessor.from_pretrained(MODEL_ID)
     model = SegformerForSemanticSegmentation.from_pretrained(MODEL_ID).to(device).eval()
     if device.type == 'cuda':
-        model = model.half()  # fp16 is the realistic deployment dtype; on CPU it is slower
-    return model, processor, device
+        model = model.half()  # fp16 on GPU; on CPU it is slower than fp32
+    return model, processor
 
 
-def parse(model, processor, frame, device):
+def parse(model, processor, frame):
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     pixel_values = processor(images=rgb, return_tensors='pt').pixel_values
     with torch.inference_mode():
-        logits = model(pixel_values=pixel_values.to(device, model.dtype)).logits
-    # SegFormer emits logits at a quarter of the input size, so scale back to the frame.
+        logits = model(pixel_values=pixel_values.to(model.device, model.dtype)).logits
+    # argmax at model resolution, then resize: cheaper than upscaling 18 channels
     upscaled = torch.nn.functional.interpolate(
-        logits.float(), size=frame.shape[:2], mode='bilinear', align_corners=False)
-    return upscaled.argmax(dim=1)[0].cpu().numpy().astype(np.uint8)
+        logits.float(), size=pixel_values.shape[-2:], mode='bilinear', align_corners=False)
+    classes = upscaled.argmax(dim=1)[0].to(torch.uint8).cpu().numpy()
+    return cv2.resize(classes, (frame.shape[1], frame.shape[0]), interpolation=cv2.INTER_NEAREST)
 
 
 def class_indices(model):
-    """Name -> index, so callers can ask for 'top' instead of memorising a number."""
     return {name: int(index) for index, name in model.config.id2label.items()}

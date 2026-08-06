@@ -1,11 +1,13 @@
-"""Measure FASHN Human Parser on one still image, on whatever device is available.
+"""Measure FASHN Human Parser latency and per-class coverage on still images.
 
-Run it on the GPU box and on a laptop to get both numbers. The GPU number decides
-whether masks can be refreshed every few frames or only once per person.
+Pass image files or a folder to compare framings; with no arguments it falls back to the
+studio shot. Run it on the GPU box and on a laptop to get both numbers — the GPU number
+decides whether masks can be refreshed every few frames or only once per person.
 
 SegFormer-B4, 18 classes, 384x576 input. First run downloads ~244 MB from HuggingFace.
 """
 
+import sys
 import time
 from pathlib import Path
 
@@ -15,9 +17,20 @@ import torch
 
 from human_parser import load_parser, parse
 
-IMAGE_PATH = 'test-images/standing_pose.png'
+DEFAULT_PATH = 'test-images/standing_pose.png'
 OUTPUT_DIR = Path('test-images-output')
-RUNS = 5
+RUNS = 1
+
+
+def image_paths(arguments):
+    """PowerShell does not expand *.png for a native command, so a folder has to expand itself."""
+    if not arguments:
+        return [Path(DEFAULT_PATH)]
+    paths = []
+    for argument in arguments:
+        path = Path(argument)
+        paths.extend(sorted(path.glob('*.png')) if path.is_dir() else [path])
+    return paths
 
 
 def build_palette(count):
@@ -47,26 +60,46 @@ def print_coverage(class_map, labels):
         print(f'{name:>11}: {share:6.1%}')
 
 
-frame = cv2.imread(IMAGE_PATH, cv2.IMREAD_COLOR)
-if frame is None:
-    raise SystemExit(f'could not read {IMAGE_PATH}')
+def show(image):
+    """Shrunk to fit the screen; judge edge quality from the full-size copy on disk instead."""
+    scale = min(1.0, 900 / image.shape[0])
+    cv2.imshow('classes | blended', cv2.resize(image, None, fx=scale, fy=scale))
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
 
+
+paths = image_paths(sys.argv[1:])
+if not paths:
+    raise SystemExit('no .png files found')
+for path in paths:
+    if not path.is_file():  # checked here because loading the model first costs 20 seconds
+        raise SystemExit(f'not a file: {path}')
+
+print(f'{len(paths)} images, loading parser...')
 model, processor, device = load_parser()
-
 print(f'device:  {torch.cuda.get_device_name(0) if device.type == "cuda" else "CPU"}')
-report_latency(model, processor, frame, device)
 
-class_map = parse(model, processor, frame, device)
-print_coverage(class_map, model.config.id2label)
-
-colored = build_palette(len(model.config.id2label))[class_map]
-blended = cv2.addWeighted(frame, 0.5, colored, 0.5, 0)
-side_by_side = np.hstack([colored, blended])
-
+palette = build_palette(len(model.config.id2label))
 OUTPUT_DIR.mkdir(exist_ok=True)
-cv2.imwrite(str(OUTPUT_DIR / 'parser_classes.png'), side_by_side)
 
-scale = min(1.0, 900 / side_by_side.shape[0])
-cv2.imshow('classes | blended', cv2.resize(side_by_side, None, fx=scale, fy=scale))
-cv2.waitKey(0)
-cv2.destroyAllWindows()
+for index, path in enumerate(paths):
+    frame = cv2.imread(str(path), cv2.IMREAD_COLOR)
+    if frame is None:
+        raise SystemExit(f'could not read {path}')
+
+    if index == 0:
+        report_latency(model, processor, frame, device)  # the same for any input, so measure once
+
+    print(f'\n{path.name}  ({frame.shape[1]}x{frame.shape[0]})')
+    class_map = parse(model, processor, frame, device)
+    print_coverage(class_map, model.config.id2label)
+
+    colored = palette[class_map]
+    blended = cv2.addWeighted(frame, 0.5, colored, 0.5, 0)
+    side_by_side = np.hstack([colored, blended])
+    cv2.imwrite(str(OUTPUT_DIR / f'{path.stem}_classes.png'), side_by_side)
+
+    if len(paths) == 1:
+        show(side_by_side)
+
+print(f'\nclass maps written to {OUTPUT_DIR}')

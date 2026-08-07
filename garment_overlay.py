@@ -62,7 +62,7 @@ HIP_OFFSET_RATIO = 1.2
 # visibly warp the whole garment to match it). Raise this above 0 to trade
 # exactness for tolerance to jittery points, if that turns out to matter
 # in practice once this is running.
-TPS_REGULARIZATION = 0.0
+TPS_REGULARIZATION = 30
 
 # How far past the tracked point cloud's bounding box to still compute and
 # draw the warp, as a multiple of shoulder width. Keeps the (fairly

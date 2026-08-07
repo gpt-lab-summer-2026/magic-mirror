@@ -1,15 +1,15 @@
 """
 Loading a calibrated garment and overlaying it on a camera frame each loop
-iteration using a thin-plate spline (TPS) warp driven by MediaPipe pose
-landmarks (shoulders, hip-center, elbows, wrists).
+iteration using per-segment rigid (rotation + uniform scale, no shear)
+warps: torso, left/right upper arm, left/right forearm.
 
-Requires opencv-contrib-python (cv2.createThinPlateSplineShapeTransformer
-lives in the contrib "shape" module, not plain opencv-python). If you have
-plain opencv-python installed, you'll likely need to uninstall it first —
-having both installed at once is a common source of import conflicts,
-since they both provide the "cv2" module:
-    pip uninstall opencv-python
-    pip install opencv-contrib-python --break-system-packages
+Unlike the earlier TPS approach, each segment can only rotate and rescale
+around its own joints — it structurally cannot stretch or fill in, since a
+similarity transform has no freedom to change shape, only orientation and
+size. Which garment pixels belong to which segment is worked out
+automatically from the existing 7 calibrated points (no new points to
+click): every opaque pixel is assigned to whichever bone line (or the
+torso triangle) it's geometrically closest to.
 """
 import json
 from pathlib import Path
@@ -53,23 +53,20 @@ MIN_VISIBILITY = 0.5
 
 # Fallback used when hip landmarks aren't visible — very common, since most
 # webcam mirror setups frame from around the chest or waist up and hips
-# never make it into the shot. Vertical distance from the shoulder midpoint
-# down to the hip midpoint, expressed as a multiple of shoulder width.
+# never make it into the shot.
 HIP_OFFSET_RATIO = 1.2
 
-# TPS regularization: 0 = exact interpolation (the warp is forced through
-# every tracked point exactly, with zero slack — a single noisy point will
-# visibly warp the whole garment to match it). Raise this above 0 to trade
-# exactness for tolerance to jittery points, if that turns out to matter
-# in practice once this is running.
-TPS_REGULARIZATION = 30
-
-# How far past the tracked point cloud's bounding box to still compute and
-# draw the warp, as a multiple of shoulder width. Keeps the (fairly
-# expensive) per-pixel TPS evaluation limited to a sensible region around
-# the body instead of the full frame, and avoids TPS's tendency to
-# extrapolate wildly far from the data it was fit on.
-PADDING_RATIO = 0.75
+# The 5 rigid segments, which live body points each one is driven by, and
+# the draw order (later entries draw on top — forearms last, so the elbow
+# joint looks clean rather than showing the upper-arm segment's edge).
+SEGMENT_REQUIRED_POINTS = {
+    "torso":            ["left_shoulder", "right_shoulder", "hip_center"],
+    "left_upper_arm":   ["left_shoulder", "left_elbow"],
+    "left_forearm":     ["left_elbow", "left_wrist"],
+    "right_upper_arm":  ["right_shoulder", "right_elbow"],
+    "right_forearm":    ["right_elbow", "right_wrist"],
+}
+SEGMENT_DRAW_ORDER = ["torso", "left_upper_arm", "right_upper_arm", "left_forearm", "right_forearm"]
 
 _last_debug_message = None
 
@@ -82,8 +79,104 @@ def _debug_log(message: str) -> None:
         _last_debug_message = message
 
 
+# --- geometry helpers, used once at garment-load time to assign each pixel
+# to its nearest segment, and every frame to fit each segment's rigid
+# transform. ---
+
+def _sign(p, q, r):
+    return (p[:, 0] - r[0]) * (q[1] - r[1]) - (q[0] - r[0]) * (p[:, 1] - r[1])
+
+
+def _point_in_triangle(pts, a, b, c):
+    d1, d2, d3 = _sign(pts, a, b), _sign(pts, b, c), _sign(pts, c, a)
+    has_neg = (d1 < 0) | (d2 < 0) | (d3 < 0)
+    has_pos = (d1 > 0) | (d2 > 0) | (d3 > 0)
+    return ~(has_neg & has_pos)
+
+
+def _point_to_segment_distance(pts, a, b):
+    seg = b - a
+    seg_len2 = np.dot(seg, seg)
+    if seg_len2 < 1e-9:
+        return np.linalg.norm(pts - a, axis=1)
+    t = np.clip(((pts - a) @ seg) / seg_len2, 0.0, 1.0)
+    proj = a + t[:, None] * seg
+    return np.linalg.norm(pts - proj, axis=1)
+
+
+def _point_to_triangle_distance(pts, a, b, c):
+    inside = _point_in_triangle(pts, a, b, c)
+    d_ab = _point_to_segment_distance(pts, a, b)
+    d_bc = _point_to_segment_distance(pts, b, c)
+    d_ca = _point_to_segment_distance(pts, c, a)
+    edge_dist = np.minimum(np.minimum(d_ab, d_bc), d_ca)
+    return np.where(inside, 0.0, edge_dist)
+
+
+def fit_similarity_transform(src_pts: np.ndarray, dst_pts: np.ndarray) -> np.ndarray:
+    """
+    Least-squares rotation + uniform scale + translation from src_pts to
+    dst_pts (Umeyama's method) — no shear, no independent x/y scaling.
+    Works for exactly 2 points (arm segments, exact fit) or more (torso,
+    least-squares fit). Returns a 2x3 matrix usable with cv2.warpAffine.
+    """
+    src_pts = np.asarray(src_pts, dtype=np.float64)
+    dst_pts = np.asarray(dst_pts, dtype=np.float64)
+    n = src_pts.shape[0]
+    mu_src, mu_dst = src_pts.mean(axis=0), dst_pts.mean(axis=0)
+    src_c, dst_c = src_pts - mu_src, dst_pts - mu_dst
+    var_src = (src_c ** 2).sum() / n
+    if var_src < 1e-9:
+        # Degenerate calibration (src points coincide) — fall back to identity-ish.
+        return np.array([[1, 0, mu_dst[0] - mu_src[0]], [0, 1, mu_dst[1] - mu_src[1]]], dtype=np.float32)
+    Sigma = (dst_c.T @ src_c) / n
+    U, D, Vt = np.linalg.svd(Sigma)
+    S = np.eye(2)
+    if np.linalg.det(Sigma) < 0 or (np.linalg.det(U) * np.linalg.det(Vt) < 0):
+        S[-1, -1] = -1
+    R = U @ S @ Vt
+    c = np.trace(np.diag(D) @ S) / var_src
+    t = mu_dst - c * (R @ mu_src)
+    return np.hstack([c * R, t.reshape(2, 1)]).astype(np.float32)
+
+
+def fit_affine_transform(src_pts: np.ndarray, dst_pts: np.ndarray) -> np.ndarray:
+    """
+    Full affine (independent x/y scale + shear allowed) from exactly 3
+    points — an exact solve, unlike similarity, which can only satisfy 3
+    arbitrary points exactly if they happen to form geometrically similar
+    triangles. Used for the torso, where forcing one uniform scale across
+    both the shoulder-width and shoulder-to-hip directions was causing it
+    to shrink to a "compromise" size whenever the live body's proportions
+    didn't exactly match the calibration photo's.
+    """
+    return cv2.getAffineTransform(
+        np.asarray(src_pts, dtype=np.float32),
+        np.asarray(dst_pts, dtype=np.float32),
+    )
+
+
+# Which fitting method each segment uses. Only the torso needs the
+# "correspondence-exact but structurally biggest range of motion" affine
+# fit — the arm segments deliberately stay similarity-only (rotation +
+# uniform scale, no shear) since that's what prevents the sleeve from
+# ballooning or filling in when the arm bends.
+SEGMENT_TRANSFORM_KIND = {
+    "torso": "affine",
+    "left_upper_arm": "similarity",
+    "left_forearm": "similarity",
+    "right_upper_arm": "similarity",
+    "right_forearm": "similarity",
+}
+
+
 class Garment:
-    """A background-removed garment image plus its calibrated anchor points."""
+    """
+    A background-removed garment image, its calibrated anchor points, and
+    a one-time partition of every opaque pixel into 5 rigid segments
+    (torso, left/right upper arm, left/right forearm) based purely on
+    which bone line (or the torso triangle) each pixel sits closest to.
+    """
 
     def __init__(self, image_path: str):
         rgba = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
@@ -110,6 +203,43 @@ class Garment:
             )
 
         self.anchors = {name: np.float32(raw_anchors[name]) for name in POINT_NAMES}
+        self.segments = self._build_segments()
+
+    def _build_segments(self):
+        h, w = self.rgba.shape[:2]
+        alpha = self.rgba[:, :, 3]
+        ys, xs = np.mgrid[0:h, 0:w]
+        pts = np.stack([xs.ravel(), ys.ravel()], axis=1).astype(np.float64)
+
+        a = self.anchors
+        distances = np.stack([
+            _point_to_triangle_distance(pts, a["left_shoulder"], a["right_shoulder"], a["hip_center"]),
+            _point_to_segment_distance(pts, a["left_shoulder"], a["left_elbow"]),
+            _point_to_segment_distance(pts, a["left_elbow"], a["left_wrist"]),
+            _point_to_segment_distance(pts, a["right_shoulder"], a["right_elbow"]),
+            _point_to_segment_distance(pts, a["right_elbow"], a["right_wrist"]),
+        ], axis=1)
+        labels = np.argmin(distances, axis=1).reshape(h, w)
+
+        segments = {}
+        for i, name in enumerate(SEGMENT_REQUIRED_POINTS):
+            seg_mask = (labels == i) & (alpha > 0)
+            ys_idx, xs_idx = np.where(seg_mask)
+            if len(xs_idx) == 0:
+                segments[name] = None  # nothing assigned to this segment — skip it at runtime
+                continue
+            x0, y0 = int(xs_idx.min()), int(ys_idx.min())
+            x1, y1 = int(xs_idx.max()) + 1, int(ys_idx.max()) + 1
+
+            seg_rgba = self.rgba[y0:y1, x0:x1].copy()
+            local_mask = seg_mask[y0:y1, x0:x1]
+            seg_rgba[~local_mask, 3] = 0  # zero alpha outside this segment, even within the bbox
+
+            required_names = SEGMENT_REQUIRED_POINTS[name]
+            src_points = np.float32([self.anchors[n] for n in required_names])
+
+            segments[name] = dict(rgba=seg_rgba, bbox=(x0, y0, x1, y1), src_points=src_points)
+        return segments
 
 
 class LandmarkSmoother:
@@ -122,7 +252,7 @@ class LandmarkSmoother:
 
     def __init__(self, alpha: float = 0.4):
         self.alpha = alpha
-        self._smoothed = {}  # name -> np.array([x, y])
+        self._smoothed = {}
 
     def update(self, named_points: dict) -> dict:
         result = {}
@@ -189,69 +319,83 @@ def get_body_points(pose_landmarks, frame_width, frame_height):
     return named_points
 
 
-def warp_and_blend(frame_bgr: np.ndarray, garment: Garment, named_dst_points: dict) -> np.ndarray:
+def _composite_segment_over(canvas_premult, canvas_alpha, seg_rgba, bbox, M):
     """
-    Fit a thin-plate spline from whichever garment anchors currently have a
-    matching tracked body point, warp the garment with it, and alpha-blend
-    onto frame_bgr within a padded region around the tracked points.
-    Returns a new frame; does not mutate frame_bgr in place. Returns
-    frame_bgr unchanged if fewer than 3 correspondences are available.
+    Warp seg_rgba (already cropped + masked to just this segment) with the
+    rigid transform M, and alpha-composite it "over" the accumulated
+    canvas at the right location, clipped to the canvas bounds.
     """
-    names = [name for name in POINT_NAMES if name in named_dst_points and name in garment.anchors]
-    if len(names) < 3:
-        return frame_bgr
+    frame_h, frame_w = canvas_alpha.shape[:2]
+    x0, y0, x1, y1 = bbox
 
-    src_pts = np.float32([garment.anchors[name] for name in names]).reshape(1, -1, 2)
-    dst_pts = np.float32([named_dst_points[name] for name in names]).reshape(1, -1, 2)
-    matches = [cv2.DMatch(i, i, 0) for i in range(len(names))]
+    corners = np.float32([[x0, y0], [x1, y0], [x1, y1], [x0, y1]])
+    transformed = (M[:, :2] @ corners.T).T + M[:, 2]
 
-    tps = cv2.createThinPlateSplineShapeTransformer(TPS_REGULARIZATION)
-    # transformingShape=dst_pts (frame space), targetShape=src_pts (garment
-    # space) — so applyTransformation() on frame-space query points below
-    # returns the corresponding garment-space coordinates, which is exactly
-    # the "where do I sample from" mapping cv2.remap needs.
-    tps.estimateTransformation(dst_pts, src_pts, matches)
+    dx0 = int(np.floor(transformed[:, 0].min()))
+    dy0 = int(np.floor(transformed[:, 1].min()))
+    dx1 = int(np.ceil(transformed[:, 0].max()))
+    dy1 = int(np.ceil(transformed[:, 1].max()))
+    dw, dh = max(dx1 - dx0, 1), max(dy1 - dy0, 1)
+    if dw > frame_w * 4 or dh > frame_h * 4:
+        return  # sanity guard against a degenerate transform blowing up the canvas size
 
-    frame_h, frame_w = frame_bgr.shape[:2]
+    # Shift M so it maps seg_rgba's own local (0,0)-origin coords directly
+    # into the destination bbox's local coords.
+    new_translation = M[:, :2] @ np.array([x0, y0], dtype=np.float32) + M[:, 2] - np.array([dx0, dy0], dtype=np.float32)
+    M_local = np.hstack([M[:, :2], new_translation.reshape(2, 1)]).astype(np.float32)
 
-    xs, ys = dst_pts[0, :, 0], dst_pts[0, :, 1]
-    shoulder_width = np.linalg.norm(
-        named_dst_points["right_shoulder"] - named_dst_points["left_shoulder"]
-    )
-    pad = max(shoulder_width * PADDING_RATIO, 1.0)
-
-    x0 = max(int(np.floor(xs.min() - pad)), 0)
-    y0 = max(int(np.floor(ys.min() - pad)), 0)
-    x1 = min(int(np.ceil(xs.max() + pad)), frame_w)
-    y1 = min(int(np.ceil(ys.max() + pad)), frame_h)
-    region_w, region_h = x1 - x0, y1 - y0
-    if region_w <= 0 or region_h <= 0:
-        return frame_bgr
-
-    grid_x, grid_y = np.meshgrid(
-        np.arange(x0, x1, dtype=np.float32),
-        np.arange(y0, y1, dtype=np.float32),
-    )
-    query_points = np.stack([grid_x.ravel(), grid_y.ravel()], axis=1).reshape(1, -1, 2)
-
-    _cost, transformed = tps.applyTransformation(query_points)
-    garment_coords = transformed.reshape(region_h, region_w, 2)
-    map_x = garment_coords[:, :, 0]
-    map_y = garment_coords[:, :, 1]
-
-    warped_region = cv2.remap(
-        garment.rgba, map_x, map_y,
-        interpolation=cv2.INTER_LINEAR,
+    warped = cv2.warpAffine(
+        seg_rgba, M_local, (dw, dh),
+        flags=cv2.INTER_LINEAR,
         borderMode=cv2.BORDER_CONSTANT,
         borderValue=(0, 0, 0, 0),
     )
 
-    warped_rgb = warped_region[:, :, :3].astype(np.float32)
-    alpha = warped_region[:, :, 3:4].astype(np.float32) / 255.0
+    cx0, cy0 = max(dx0, 0), max(dy0, 0)
+    cx1, cy1 = min(dx0 + dw, frame_w), min(dy0 + dh, frame_h)
+    if cx1 <= cx0 or cy1 <= cy0:
+        return
+    lx0, ly0 = cx0 - dx0, cy0 - dy0
+    lx1, ly1 = cx1 - dx0, cy1 - dy0
 
-    region = frame_bgr[y0:y1, x0:x1].astype(np.float32)
-    blended_region = warped_rgb * alpha + region * (1 - alpha)
+    patch_rgb = warped[ly0:ly1, lx0:lx1, :3].astype(np.float32)
+    patch_alpha = warped[ly0:ly1, lx0:lx1, 3].astype(np.float32) / 255.0
 
-    result = frame_bgr.copy()
-    result[y0:y1, x0:x1] = blended_region.astype(np.uint8)
-    return result
+    region_premult = canvas_premult[cy0:cy1, cx0:cx1]
+    region_alpha = canvas_alpha[cy0:cy1, cx0:cx1]
+
+    a = patch_alpha[:, :, None]
+    region_premult[:] = patch_rgb * a + region_premult * (1 - a)
+    region_alpha[:] = patch_alpha + region_alpha * (1 - patch_alpha)
+
+
+def warp_and_blend(frame_bgr: np.ndarray, garment: Garment, named_dst_points: dict) -> np.ndarray:
+    """
+    Warp each of the garment's 5 rigid segments (whichever have all their
+    required live points currently tracked) with its own rotation+scale
+    transform, layering them in SEGMENT_DRAW_ORDER, then alpha-blend the
+    result onto frame_bgr. Returns a new frame; does not mutate frame_bgr.
+    """
+    h, w = frame_bgr.shape[:2]
+    canvas_premult = np.zeros((h, w, 3), dtype=np.float32)
+    canvas_alpha = np.zeros((h, w), dtype=np.float32)
+
+    for name in SEGMENT_DRAW_ORDER:
+        seg = garment.segments.get(name)
+        if seg is None:
+            continue
+        required_names = SEGMENT_REQUIRED_POINTS[name]
+        if not all(n in named_dst_points for n in required_names):
+            continue
+
+        dst_points = np.float32([named_dst_points[n] for n in required_names])
+        kind = SEGMENT_TRANSFORM_KIND[name]
+        if kind == "affine":
+            M = fit_affine_transform(seg["src_points"], dst_points)
+        else:
+            M = fit_similarity_transform(seg["src_points"], dst_points)
+        _composite_segment_over(canvas_premult, canvas_alpha, seg["rgba"], seg["bbox"], M)
+
+    alpha = canvas_alpha[:, :, None]
+    blended = canvas_premult + frame_bgr.astype(np.float32) * (1 - alpha)
+    return blended.astype(np.uint8)

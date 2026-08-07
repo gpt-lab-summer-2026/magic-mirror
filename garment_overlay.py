@@ -68,6 +68,23 @@ SEGMENT_REQUIRED_POINTS = {
 }
 SEGMENT_DRAW_ORDER = ["torso", "left_upper_arm", "right_upper_arm", "left_forearm", "right_forearm"]
 
+# How far each segment's mask extends past its base (nearest-line)
+# boundary at a shared joint, as a multiple of that segment's own typical
+# half-width. >1.0 means the rounded cap is a bit larger than the limb's
+# own thickness — like a real paper-doll rivet — which comfortably covers
+# the joint at any bend angle rather than just barely reaching it.
+JOINT_OVERLAP_MULTIPLIER = 1.15
+
+# (segment_a, segment_b, shared joint anchor name) for every place two
+# segments meet. Both segments get a circular overlap zone added around
+# that joint point, on top of their normal nearest-line assignment.
+SEGMENT_JOINTS = [
+    ("torso", "left_upper_arm", "left_shoulder"),
+    ("torso", "right_upper_arm", "right_shoulder"),
+    ("left_upper_arm", "left_forearm", "left_elbow"),
+    ("right_upper_arm", "right_forearm", "right_elbow"),
+]
+
 _last_debug_message = None
 
 
@@ -212,6 +229,7 @@ class Garment:
         pts = np.stack([xs.ravel(), ys.ravel()], axis=1).astype(np.float64)
 
         a = self.anchors
+        segment_names = list(SEGMENT_REQUIRED_POINTS.keys())
         distances = np.stack([
             _point_to_triangle_distance(pts, a["left_shoulder"], a["right_shoulder"], a["hip_center"]),
             _point_to_segment_distance(pts, a["left_shoulder"], a["left_elbow"]),
@@ -219,11 +237,40 @@ class Garment:
             _point_to_segment_distance(pts, a["right_shoulder"], a["right_elbow"]),
             _point_to_segment_distance(pts, a["right_elbow"], a["right_wrist"]),
         ], axis=1)
-        labels = np.argmin(distances, axis=1).reshape(h, w)
+        labels = np.argmin(distances, axis=1)
+
+        opaque = (alpha.ravel() > 0)
+
+        # Base assignment: each pixel belongs to whichever bone (or the
+        # torso triangle) it's nearest to — no overlap yet.
+        seg_masks = {}
+        half_width = {}
+        for i, name in enumerate(segment_names):
+            mask = (labels == i) & opaque
+            seg_masks[name] = mask
+            # A robust "typical half-width" for this segment: the 75th
+            # percentile of how far its own pixels sit from its own bone,
+            # used only to size that segment's joint overlap radius below.
+            own_dist = distances[mask, i]
+            half_width[name] = float(np.percentile(own_dist, 75)) if own_dist.size else 0.0
+
+        # Rounded, overlapping joints: add a circular disk of pixels around
+        # each shared joint point to BOTH neighboring segments' masks, on
+        # top of the base assignment above.
+        for seg_a, seg_b, joint_name in SEGMENT_JOINTS:
+            joint_point = a[joint_name]
+            if seg_a == "torso":
+                radius = JOINT_OVERLAP_MULTIPLIER * half_width[seg_b]
+            else:
+                radius = JOINT_OVERLAP_MULTIPLIER * min(half_width[seg_a], half_width[seg_b])
+            dist_to_joint = np.linalg.norm(pts - joint_point, axis=1)
+            near_joint = (dist_to_joint <= radius) & opaque
+            seg_masks[seg_a] = seg_masks[seg_a] | near_joint
+            seg_masks[seg_b] = seg_masks[seg_b] | near_joint
 
         segments = {}
-        for i, name in enumerate(SEGMENT_REQUIRED_POINTS):
-            seg_mask = (labels == i) & (alpha > 0)
+        for name in segment_names:
+            seg_mask = seg_masks[name].reshape(h, w)
             ys_idx, xs_idx = np.where(seg_mask)
             if len(xs_idx) == 0:
                 segments[name] = None  # nothing assigned to this segment — skip it at runtime

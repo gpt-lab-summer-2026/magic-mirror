@@ -11,6 +11,7 @@ from mediapipe.tasks.python.vision import drawing_utils, drawing_styles
 
 import config
 import garment_overlay
+import garment_library
 
 WINDOW = "Magic Mirror"
 
@@ -18,8 +19,13 @@ WINDOW = "Magic Mirror"
 # mostly black bars, so the frame gets centre-cropped to this aspect instead.
 DISPLAY_ASPECT = 9 / 16
 
-# One garment until C2 swaps this for a scan of config.GARMENT_DIR.
-GARMENT_PATH = "test-images-output/bg_white_top.out.png"
+# waitKeyEx codes for the arrows under Linux/Qt. They have no 8-bit form,
+# which is why the loop reads waitKeyEx and never masks with 0xFF -
+# 65361 & 0xFF is ord('Q').
+KEY_LEFT = 65361
+KEY_RIGHT = 65363
+
+NAME_FLASH_FRAMES = 45   # ~1.5 s at 30 fps
 
 latest_result = None
 latest_result_lock = threading.Lock()
@@ -78,18 +84,16 @@ options = vision.PoseLandmarkerOptions(
     running_mode=vision.RunningMode.LIVE_STREAM,
     result_callback=store_result)
 
-try:
-    garment = garment_overlay.Garment(GARMENT_PATH)
-    print(f"Loaded garment: {GARMENT_PATH}", flush=True)
-except FileNotFoundError as e:
-    garment = None
-    print(f"No garment loaded ({e})", flush=True)
+garment_library.load()
+print(f"Loaded {len(garment_library.GARMENTS)} garments: "
+      f"{', '.join(g.name for g in garment_library.GARMENTS)}", flush=True)
 
 smoother = garment_overlay.LandmarkSmoother(alpha=0.4)
 show_debug = False
 fullscreen = True
+name_frames = 0
 
-print("keys: d debug   f fullscreen   q / Esc quit", flush=True)
+print("keys: <- -> garment   1-9 pick   d debug   f fullscreen   q / Esc quit", flush=True)
 
 with vision.PoseLandmarker.create_from_options(options) as landmarker:
     cap = open_camera()
@@ -125,17 +129,32 @@ with vision.PoseLandmarker.create_from_options(options) as landmarker:
                     landmark_drawing_spec=drawing_styles.get_default_pose_landmarks_style(),
                     connection_drawing_spec=drawing_utils.DrawingSpec(color=(0, 255, 0), thickness=2))
 
+        garment = garment_library.current()
         if has_pose and garment is not None:
             h, w = frame.shape[:2]
             body_points = garment_overlay.get_body_points(result.pose_landmarks[0], w, h)
             if body_points is not None:
                 frame = garment_overlay.warp_and_blend(frame, garment, smoother.update(body_points))
 
-        cv2.imshow(WINDOW, crop_to_display(frame))
+        shown = crop_to_display(frame)
+        if name_frames > 0 and garment is not None:
+            name_frames -= 1
+            cv2.putText(shown, garment.name, (20, shown.shape[0] - 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
+        cv2.imshow(WINDOW, shown)
 
-        key = cv2.waitKey(1) & 0xFF
+        key = cv2.waitKeyEx(1)
         if key == ord('q') or key == 27:
             break
+        elif key == KEY_RIGHT:
+            garment_library.next()
+            name_frames = NAME_FLASH_FRAMES
+        elif key == KEY_LEFT:
+            garment_library.previous()
+            name_frames = NAME_FLASH_FRAMES
+        elif ord('1') <= key <= ord('9'):
+            garment_library.select(key - ord('1'))
+            name_frames = NAME_FLASH_FRAMES
         elif key == ord('d'):
             show_debug = not show_debug
         elif key == ord('f'):

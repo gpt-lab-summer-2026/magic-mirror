@@ -1,0 +1,30 @@
+{
+  "left_shoulder": [
+    280,
+    324
+  ],
+  "right_shoulder": [
+    800,
+    342
+  ],
+  "hip_center": [
+    519,
+    701
+  ],
+  "left_elbow": [
+    179,
+    581
+  ],
+  "right_elbow": [
+    900,
+    597
+  ],
+  "left_wrist": [
+    103,
+    831
+  ],
+  "right_wrist": [
+    976,
+    862
+  ]
+}

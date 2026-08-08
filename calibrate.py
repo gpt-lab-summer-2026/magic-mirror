@@ -12,11 +12,10 @@ overlay can never disagree about ordering):
   6. Left wrist
   7. Right wrist
 
-These become the "src" side of the affine fit used every frame to warp the
-garment onto the tracked body. At runtime, whichever of these points has a
-currently-visible match on the body (shoulders + hip-center are always
-required; elbows/wrists are used opportunistically) get fed into a
-least-squares affine solve.
+These become the correspondences the runtime TPS warp is fit against each
+frame — whichever of these points has a currently-visible match on the
+body (shoulders + hip-center are always required; elbows/wrists are used
+opportunistically) get fed into the spline solve.
 
 Saves a sidecar JSON next to the image: <name>.anchors.json
 

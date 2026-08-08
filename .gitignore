@@ -19,6 +19,7 @@ dist/
 
 # Model files
 *.task
+*.tflite
 
 # IDE
 .vscode/
@@ -28,4 +29,10 @@ dist/
 .DS_Store
 Thumbs.db
 
+
+# Local files to ignore
+ignore/
+CLAUDE.md
+
 test-images-output/
+webcam-captures/

@@ -1,0 +1,19 @@
+"""
+Machine constants: which camera, what it captures, which model file.
+
+Geometry constants stay in garment_overlay.py next to the code that reads
+them - a copy here would be a second source of truth, not a tidier one.
+"""
+
+# /dev/videoN is handed out in plug order, so a reboot or a second camera can
+# move the index with no error. This link always points at the demo camera.
+CAMERA_BY_ID = "/dev/v4l/by-id/usb-SHENZHEN_AONI_ELECTRONIC_CO._LTD_UHD_4K_Camera_N20200814003-video-index0"
+
+# 4:3, not 16:9: on a portrait screen the 9:16 crop keeps 540 of these 1280
+# columns where 1280x720 would keep 405. MJPG only - YUYV tops out at 10fps
+# at this size on a USB 2.0 bus.
+CAPTURE_SIZE = (1280, 960)
+CAPTURE_FPS = 30
+
+POSE_MODEL = "pose_landmarker_full.task"
+GARMENT_DIR = "garments"   # scanned by garment_library.py in C2; nothing reads it yet

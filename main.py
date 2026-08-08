@@ -1,137 +1,147 @@
+import os
+import sys
 import threading
 import time
+
+import cv2
 import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
-from mediapipe.tasks.python.vision import drawing_utils
-from mediapipe.tasks.python.vision import drawing_styles
-import cv2
-import numpy as np
-import bg_remove
+from mediapipe.tasks.python.vision import drawing_utils, drawing_styles
+
+import config
 import garment_overlay
 
-model_path = 'pose_landmarker_full.task'
+WINDOW = "Magic Mirror"
 
-BaseOptions = mp.tasks.BaseOptions
-PoseLandmarker = mp.tasks.vision.PoseLandmarker
-PoseLandmarkerOptions = mp.tasks.vision.PoseLandmarkerOptions
-PoseLandmarkerResult = mp.tasks.vision.PoseLandmarkerResult
-VisionRunningMode = mp.tasks.vision.RunningMode
+# The demo screen is a rotated monitor: a 16:9 frame letterboxed into it is
+# mostly black bars, so the frame gets centre-cropped to this aspect instead.
+DISPLAY_ASPECT = 9 / 16
+
+# One garment until C2 swaps this for a scan of config.GARMENT_DIR.
+GARMENT_PATH = "test-images-output/bg_white_top.out.png"
 
 latest_result = None
 latest_result_lock = threading.Lock()
 
-test_image = 'test-images/bg_white_top.png'
 
-# Once you've run bg_remove on a garment and then calibrate.py on the result,
-# point this at the resulting .out.png (it looks for a matching
-# .anchors.json saved right next to it). Until that file + its calibration
-# exist, the overlay is simply skipped and the app behaves as before.
-GARMENT_PATH = 'test-images-output/bg_white_top.out.png'
-
-
-def draw_landmarks_on_image(rgb_image, detection_result):
-  annotated_image = np.copy(rgb_image)
-  pose_landmark_style = drawing_styles.get_default_pose_landmarks_style()
-  pose_connection_style = drawing_utils.DrawingSpec(color=(0, 255, 0), thickness=2)
-
-  for pose_landmarks in detection_result.pose_landmarks:
-    drawing_utils.draw_landmarks(
-        image=annotated_image,
-        landmark_list=pose_landmarks,
-        connections=vision.PoseLandmarksConnections.POSE_LANDMARKS,
-        landmark_drawing_spec=pose_landmark_style,
-        connection_drawing_spec=pose_connection_style)
-
-  return annotated_image
-
-
-# Create a pose landmarker instance with the live stream mode:
-def store_result(result: PoseLandmarkerResult, output_image: mp.Image, timestamp_ms: int):
+def store_result(result: vision.PoseLandmarkerResult, output_image: mp.Image, timestamp_ms: int):
     global latest_result
     with latest_result_lock:
         latest_result = result
 
-options = PoseLandmarkerOptions(
-    base_options=BaseOptions(model_asset_path=model_path),
-    running_mode=VisionRunningMode.LIVE_STREAM,
+
+def open_camera():
+    """Resolve the stable by-id link to whichever /dev/videoN it points at today."""
+    device = os.path.realpath(config.CAMERA_BY_ID)
+    if not device.startswith("/dev/video"):
+        sys.exit(f"No camera at {config.CAMERA_BY_ID} - is it plugged in?")
+
+    cap = cv2.VideoCapture(int(device.removeprefix("/dev/video")))
+    if not cap.isOpened():
+        sys.exit(f"Could not open {device}. The demo runs from the machine's own "
+                 "desktop session - over SSH the camera is not reachable.")
+
+    # FOURCC first: it sets the bandwidth budget, and only MJPG fits a full
+    # frame on this USB 2.0 bus. Set it after the size and the driver has
+    # already picked a size for the format it was previously in.
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAPTURE_SIZE[0])
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAPTURE_SIZE[1])
+    cap.set(cv2.CAP_PROP_FPS, config.CAPTURE_FPS)
+    # 2, not 1: with a single buffer the driver has nowhere to put frame N+1
+    # while we hold frame N, and the capture rate halves - measured 15 vs 30.
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
+
+    # A driver silently substitutes a mode it does support, so print what we
+    # actually got rather than what we asked for.
+    fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
+    codec = "".join(chr((fourcc >> 8 * i) & 0xFF) for i in range(4))
+    width, height = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    print(f"Camera {device}: {codec} {width}x{height} @ {cap.get(cv2.CAP_PROP_FPS):.0f} fps", flush=True)
+    return cap
+
+
+def crop_to_display(frame):
+    """Centre-crop to the screen's aspect. Pose runs on the full frame, so an
+    arm outside the crop keeps tracking - it just isn't shown."""
+    h, w = frame.shape[:2]
+    crop_w = int(h * DISPLAY_ASPECT)
+    if crop_w >= w:
+        return frame
+    x0 = (w - crop_w) // 2
+    return frame[:, x0:x0 + crop_w]
+
+
+options = vision.PoseLandmarkerOptions(
+    base_options=python.BaseOptions(model_asset_path=config.POSE_MODEL),
+    running_mode=vision.RunningMode.LIVE_STREAM,
     result_callback=store_result)
 
-# Try to load a calibrated garment at startup.
 try:
     garment = garment_overlay.Garment(GARMENT_PATH)
     print(f"Loaded garment: {GARMENT_PATH}", flush=True)
 except FileNotFoundError as e:
     garment = None
-    print(f"No garment loaded yet ({e})", flush=True)
-    print("Press 'i' to background-remove the test image, then run "
-          f"'python calibrate.py <output path>' on it, then restart.", flush=True)
+    print(f"No garment loaded ({e})", flush=True)
 
 smoother = garment_overlay.LandmarkSmoother(alpha=0.4)
+show_debug = False
+fullscreen = True
 
-with PoseLandmarker.create_from_options(options) as landmarker:
-  # Use OpenCV's VideoCapture to start capturing from the webcam.
-  cap = cv2.VideoCapture(0)
-  start_time = time.time()
+print("keys: d debug   f fullscreen   q / Esc quit", flush=True)
 
-  # Create a loop to read the latest frame from the camera using VideoCapture#read()
-  while cap.isOpened():
-    success, numpy_frame_from_opencv = cap.read()
-    if not success:
-      print('Ignoring empty camera frame.')
-      break
+with vision.PoseLandmarker.create_from_options(options) as landmarker:
+    cap = open_camera()
+    cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
+    cv2.setWindowProperty(WINDOW, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    start_time = time.time()
 
-    numpy_frame_from_opencv = cv2.cvtColor(numpy_frame_from_opencv, cv2.COLOR_BGR2RGB)
+    while cap.isOpened():
+        success, frame = cap.read()
+        if not success:
+            print("Ignoring empty camera frame.")
+            break
 
-    # Convert the frame received from OpenCV to a MediaPipe's Image object.
-    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=numpy_frame_from_opencv)
+        # Mirror once, at the source: flip at display time instead and
+        # MediaPipe's left_*/right_* describe the unflipped image while the
+        # garment's anchors describe the flipped one.
+        frame = cv2.flip(frame, 1)
 
-    frame_timestamp_ms = int((time.time() - start_time) * 1000)
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        landmarker.detect_async(mp_image, int((time.time() - start_time) * 1000))
 
-    # Send live image data to perform pose landmarking.
-    # The results are accessible via the `result_callback` provided in
-    # the `PoseLandmarkerOptions` object.
-    # The pose landmarker must be created with the live stream mode.
-    landmarker.detect_async(mp_image, frame_timestamp_ms)
+        with latest_result_lock:
+            result = latest_result
+        has_pose = result is not None and bool(result.pose_landmarks)
 
-    with latest_result_lock:
-      result_to_draw = latest_result
+        if has_pose and show_debug:
+            for pose_landmarks in result.pose_landmarks:
+                drawing_utils.draw_landmarks(
+                    image=frame,
+                    landmark_list=pose_landmarks,
+                    connections=vision.PoseLandmarksConnections.POSE_LANDMARKS,
+                    landmark_drawing_spec=drawing_styles.get_default_pose_landmarks_style(),
+                    connection_drawing_spec=drawing_utils.DrawingSpec(color=(0, 255, 0), thickness=2))
 
-    if result_to_draw is not None and result_to_draw.pose_landmarks:
-      annotated_frame = draw_landmarks_on_image(numpy_frame_from_opencv, result_to_draw)
-    else:
-      annotated_frame = numpy_frame_from_opencv
+        if has_pose and garment is not None:
+            h, w = frame.shape[:2]
+            body_points = garment_overlay.get_body_points(result.pose_landmarks[0], w, h)
+            if body_points is not None:
+                frame = garment_overlay.warp_and_blend(frame, garment, smoother.update(body_points))
 
-    display_frame = cv2.cvtColor(annotated_frame, cv2.COLOR_RGB2BGR)
+        cv2.imshow(WINDOW, crop_to_display(frame))
 
-    # --- garment overlay ---
-    # Runs after landmark drawing so the garment sits on top of the frame;
-    # swap the order above if you'd rather see the skeleton on top instead.
-    if garment is not None and result_to_draw is not None and result_to_draw.pose_landmarks:
-      h, w = display_frame.shape[:2]
-      body_points = garment_overlay.get_body_points(
-          result_to_draw.pose_landmarks[0], w, h)
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('q') or key == 27:
+            break
+        elif key == ord('d'):
+            show_debug = not show_debug
+        elif key == ord('f'):
+            fullscreen = not fullscreen
+            cv2.setWindowProperty(WINDOW, cv2.WND_PROP_FULLSCREEN,
+                                  cv2.WINDOW_FULLSCREEN if fullscreen else cv2.WINDOW_NORMAL)
 
-      if body_points is not None:
-        smoothed_points = smoother.update(body_points)
-        display_frame = garment_overlay.warp_and_blend(display_frame, garment, smoothed_points)
-      # else: landmarks not confident enough this frame — this frame simply
-      # doesn't get a new overlay drawn onto it.
-    # ------------------------
-
-    cv2.putText(display_frame, "press i to process image and q to quit", (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-    cv2.imshow('Webcam', display_frame)
-
-    # Check for user input for the test image or quit the application
-    if cv2.waitKey(1) & 0xFF == ord('i'):
-      print("Removing background from test image...")
-      no_bg_image_path = bg_remove.remove_background_from_image(test_image, 'test-images-output')
-      print(f"Background removed image saved at: {no_bg_image_path}")
-      print(f"Now run: python calibrate.py {no_bg_image_path}")
-
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-      break
-
-  cap.release()
-  cv2.destroyAllWindows()
+    cap.release()
+    cv2.destroyAllWindows()

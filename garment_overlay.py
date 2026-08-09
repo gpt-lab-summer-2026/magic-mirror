@@ -130,6 +130,15 @@ def _point_to_triangle_distance(pts, a, b, c):
     return np.where(inside, 0.0, edge_dist)
 
 
+def _distance_to_segment_shape(name, pts, anchors):
+    """Torso is a triangle, every arm segment is the line between its two joints."""
+    if name == "torso":
+        a, b, c = (anchors[n] for n in SEGMENT_REQUIRED_POINTS["torso"])
+        return _point_to_triangle_distance(pts, a, b, c)
+    start, end = (anchors[n] for n in SEGMENT_REQUIRED_POINTS[name])
+    return _point_to_segment_distance(pts, start, end)
+
+
 def fit_similarity_transform(src_pts: np.ndarray, dst_pts: np.ndarray) -> np.ndarray:
     """
     Least-squares rotation + uniform scale + translation from src_pts to
@@ -228,8 +237,24 @@ class Garment:
                 f'"occluders": ["hands", "face", "hair"] - plus "arms" if it is sleeveless.'
             )
 
+        # Not defaulted: arm segments left on a sleeveless garment steal the
+        # fabric down its sides and fly it off on the wearer's forearms.
+        if "segments" not in raw_anchors:
+            raise ValueError(
+                f'Calibration file for {image_path} has no "segments" list. Add the parts '
+                f'this garment actually covers, e.g. ["torso"] for a sleeveless dress. '
+                f'Valid names: {", ".join(SEGMENT_REQUIRED_POINTS)}'
+            )
+        unknown = [s for s in raw_anchors["segments"] if s not in SEGMENT_REQUIRED_POINTS]
+        if unknown:
+            raise ValueError(
+                f"Calibration file for {image_path} lists unknown segments {unknown}. "
+                f'Valid names: {", ".join(SEGMENT_REQUIRED_POINTS)}'
+            )
+
         self.anchors = {name: np.float32(raw_anchors[name]) for name in POINT_NAMES}
         self.occluders = raw_anchors["occluders"]
+        self.segment_names = raw_anchors["segments"]
         self.segments = self._build_segments()
 
     def _build_segments(self):
@@ -239,14 +264,9 @@ class Garment:
         pts = np.stack([xs.ravel(), ys.ravel()], axis=1).astype(np.float64)
 
         a = self.anchors
-        segment_names = list(SEGMENT_REQUIRED_POINTS.keys())
-        distances = np.stack([
-            _point_to_triangle_distance(pts, a["left_shoulder"], a["right_shoulder"], a["hip_center"]),
-            _point_to_segment_distance(pts, a["left_shoulder"], a["left_elbow"]),
-            _point_to_segment_distance(pts, a["left_elbow"], a["left_wrist"]),
-            _point_to_segment_distance(pts, a["right_shoulder"], a["right_elbow"]),
-            _point_to_segment_distance(pts, a["right_elbow"], a["right_wrist"]),
-        ], axis=1)
+        segment_names = self.segment_names
+        distances = np.stack(
+            [_distance_to_segment_shape(name, pts, a) for name in segment_names], axis=1)
         labels = np.argmin(distances, axis=1)
 
         opaque = (alpha.ravel() > 0)
@@ -268,6 +288,8 @@ class Garment:
         # each shared joint point to BOTH neighboring segments' masks, on
         # top of the base assignment above.
         for seg_a, seg_b, joint_name in SEGMENT_JOINTS:
+            if seg_a not in seg_masks or seg_b not in seg_masks:
+                continue  # a joint only exists where both of its segments do
             joint_point = a[joint_name]
             if seg_a == "torso":
                 radius = JOINT_OVERLAP_MULTIPLIER * half_width[seg_b]

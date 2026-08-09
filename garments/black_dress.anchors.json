@@ -27,5 +27,6 @@
     737,
     557
   ],
+  "segments": ["torso"],
   "occluders": ["hands", "arms", "face", "hair"]
 }

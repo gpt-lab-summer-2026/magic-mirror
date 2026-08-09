@@ -9,6 +9,9 @@ them - a copy here would be a second source of truth, not a tidier one.
 # move the index with no error. This link always points at the demo camera.
 CAMERA_BY_ID = "/dev/v4l/by-id/usb-SHENZHEN_AONI_ELECTRONIC_CO._LTD_UHD_4K_Camera_N20200814003-video-index0"
 
+# Used wherever that link does not resolve - any other machine, and Windows.
+CAMERA_INDEX = 0
+
 # 4:3, not 16:9: on a portrait screen the 9:16 crop keeps 540 of these 1280
 # columns where 1280x720 would keep 405. MJPG only - YUYV tops out at 10fps
 # at this size on a USB 2.0 bus.

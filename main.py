@@ -21,11 +21,11 @@ WINDOW = "Magic Mirror"
 # mostly black bars, so the frame gets centre-cropped to this aspect instead.
 DISPLAY_ASPECT = 9 / 16
 
-# waitKeyEx codes for the arrows under Linux/Qt. They have no 8-bit form,
-# which is why the loop reads waitKeyEx and never masks with 0xFF -
+# waitKeyEx codes for the arrows, Linux/Qt then Windows. They have no 8-bit
+# form, which is why the loop reads waitKeyEx and never masks with 0xFF -
 # 65361 & 0xFF is ord('Q').
-KEY_LEFT = 65361
-KEY_RIGHT = 65363
+KEY_LEFT = (65361, 2424832)
+KEY_RIGHT = (65363, 2555904)
 
 NAME_FLASH_FRAMES = 45   # ~1.5 s at 30 fps
 
@@ -90,23 +90,25 @@ def dump_debug(clean, class_map, shown):
 
 
 def open_camera():
-    """Resolve the stable by-id link to whichever /dev/videoN it points at today."""
+    """The rig's camera when its by-id link resolves, else config.CAMERA_INDEX."""
     device = os.path.realpath(config.CAMERA_BY_ID)
-    if not device.startswith("/dev/video"):
-        sys.exit(f"No camera at {config.CAMERA_BY_ID} - is it plugged in?")
+    is_rig = device.startswith("/dev/video")
+    index = int(device.removeprefix("/dev/video")) if is_rig else config.CAMERA_INDEX
 
-    cap = cv2.VideoCapture(int(device.removeprefix("/dev/video")))
+    cap = cv2.VideoCapture(index)
     if not cap.isOpened():
-        sys.exit(f"Could not open {device}. The demo runs from the machine's own "
+        sys.exit(f"Could not open camera {index}. The demo runs from the machine's own "
                  "desktop session - over SSH the camera is not reachable.")
 
-    # FOURCC first: it sets the bandwidth budget, and only MJPG fits a full
-    # frame on this USB 2.0 bus. Set it after the size and the driver has
-    # already picked a size for the format it was previously in.
-    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAPTURE_SIZE[0])
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAPTURE_SIZE[1])
-    cap.set(cv2.CAP_PROP_FPS, config.CAPTURE_FPS)
+    if is_rig:
+        # FOURCC first: it sets the bandwidth budget, and only MJPG fits a full
+        # frame on this USB 2.0 bus. Set it after the size and the driver has
+        # already picked a size for the format it was previously in. Both are
+        # facts about this camera, so any other one keeps its driver defaults.
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAPTURE_SIZE[0])
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAPTURE_SIZE[1])
+        cap.set(cv2.CAP_PROP_FPS, config.CAPTURE_FPS)
     # 2, not 1: with a single buffer the driver has nowhere to put frame N+1
     # while we hold frame N, and the capture rate halves - measured 15 vs 30.
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
@@ -116,7 +118,7 @@ def open_camera():
     fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
     codec = "".join(chr((fourcc >> 8 * i) & 0xFF) for i in range(4))
     width, height = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    print(f"Camera {device}: {codec} {width}x{height} @ {cap.get(cv2.CAP_PROP_FPS):.0f} fps", flush=True)
+    print(f"Camera {index}: {codec} {width}x{height} @ {cap.get(cv2.CAP_PROP_FPS):.0f} fps", flush=True)
     return cap
 
 
@@ -140,17 +142,22 @@ garment_library.load()
 print(f"Loaded {len(garment_library.GARMENTS)} garments: "
       f"{', '.join(g.name for g in garment_library.GARMENTS)}", flush=True)
 
-parser_model, parser_processor = human_parser.load_parser()
-labels = human_parser.class_indices(parser_model)
-print(f"Parser on {parser_model.device}, classes: {', '.join(sorted(labels))}", flush=True)
-for g in garment_library.GARMENTS:
-    g.occluder_lut = composite.resolve_occluders(g, labels)
+# GPU or not at all: 1.5 s per frame on CPU, and it starves the render loop.
+use_parser = human_parser.gpu_available()
+if use_parser:
+    parser_model, parser_processor = human_parser.load_parser()
+    labels = human_parser.class_indices(parser_model)
+    print(f"Parser on {parser_model.device}, classes: {', '.join(sorted(labels))}", flush=True)
+    for g in garment_library.GARMENTS:
+        g.occluder_lut = composite.resolve_occluders(g, labels)
 
-# daemon: `q` must end the process even if the parser is mid-inference. The
-# worker holds no file or socket and its class map is throwaway, so there is
-# nothing a clean shutdown would protect - and a join() on a wedged torch call
-# is exactly the kiosk that needs Ctrl-C.
-threading.Thread(target=parse_worker, daemon=True).start()
+    # daemon: `q` must end the process even if the parser is mid-inference. The
+    # worker holds no file or socket and its class map is throwaway, so there is
+    # nothing a clean shutdown would protect - and a join() on a wedged torch call
+    # is exactly the kiosk that needs Ctrl-C.
+    threading.Thread(target=parse_worker, daemon=True).start()
+else:
+    print("No GPU: parser off, so garments draw over hands and bare arms.", flush=True)
 
 smoother = garment_overlay.LandmarkSmoother(alpha=0.4)
 frame_ms = 1000 / config.CAPTURE_FPS   # smoothed; the raw per-frame number is unreadable jitter
@@ -219,20 +226,21 @@ with vision.PoseLandmarker.create_from_options(options) as landmarker:
                     light_from=clean if relight else None)
                 t = mark("warp", t)
 
-                if frames % config.PARSER_EVERY_N == 0:
-                    # `clean` is a fresh copy every frame and nothing writes into
-                    # it - warp_and_blend returns a new frame rather than mutating
-                    # this one - so the worker can read it while the loop draws on.
-                    with parser_frame_lock:
-                        parser_frame = (clean, now_ms)
-                with latest_class_map_lock:
-                    class_map, class_map_ms = latest_class_map
-                ages["map"] = now_ms - class_map_ms
-                # A map sized to a different frame would index out of bounds.
-                # Skipping the composite for one frame beats taking the kiosk down.
-                if class_map is not None and class_map.shape == frame.shape[:2]:
-                    frame = composite.apply_occluders(frame, clean, class_map, garment.occluder_lut)
-                t = mark("occlude", t)
+                if use_parser:
+                    if frames % config.PARSER_EVERY_N == 0:
+                        # `clean` is a fresh copy every frame and nothing writes into
+                        # it - warp_and_blend returns a new frame rather than mutating
+                        # this one - so the worker can read it while the loop draws on.
+                        with parser_frame_lock:
+                            parser_frame = (clean, now_ms)
+                    with latest_class_map_lock:
+                        class_map, class_map_ms = latest_class_map
+                    ages["map"] = now_ms - class_map_ms
+                    # A map sized to a different frame would index out of bounds.
+                    # Skipping the composite for one frame beats taking the kiosk down.
+                    if class_map is not None and class_map.shape == frame.shape[:2]:
+                        frame = composite.apply_occluders(frame, clean, class_map, garment.occluder_lut)
+                    t = mark("occlude", t)
 
         shown = crop_to_display(frame)
         if name_frames > 0 and garment is not None:
@@ -259,10 +267,10 @@ with vision.PoseLandmarker.create_from_options(options) as landmarker:
         frame_ms = 0.6 * frame_ms + 0.4 * (time.perf_counter() - loop_start) * 1000
         if key == ord('q') or key == 27:
             break
-        elif key == KEY_RIGHT:
+        elif key in KEY_RIGHT:
             garment_library.next()
             name_frames = NAME_FLASH_FRAMES
-        elif key == KEY_LEFT:
+        elif key in KEY_LEFT:
             garment_library.previous()
             name_frames = NAME_FLASH_FRAMES
         elif ord('1') <= key <= ord('9'):

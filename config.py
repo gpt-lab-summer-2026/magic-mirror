@@ -16,4 +16,12 @@ CAPTURE_SIZE = (1280, 960)
 CAPTURE_FPS = 30
 
 POSE_MODEL = "pose_landmarker_full.task"
+
+# Hand the parser thread every Nth frame. Raising this does not buy frame rate -
+# the parse is off the render loop, so it only lowers the parser's duty cycle -
+# and it costs staleness twice over: N frames of waiting on top of the parse
+# itself. A stale map is worse than a lagging one, because the pixels copied are
+# current while the mask is not: a moved arm punches its old shape through the
+# garment. At 3 that measured ~120 ms and crossed arms tore visibly.
+PARSER_EVERY_N = 1
 GARMENT_DIR = "garments"   # scanned by garment_library.py in C2; nothing reads it yet

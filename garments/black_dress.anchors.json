@@ -26,5 +26,6 @@
   "right_wrist": [
     737,
     557
-  ]
+  ],
+  "occluders": ["hands", "arms", "face", "hair"]
 }

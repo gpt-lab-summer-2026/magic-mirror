@@ -219,7 +219,17 @@ class Garment:
                 f"Re-run: python calibrate.py {image_path}"
             )
 
+        # calibrate.py does not write this key, so a newly calibrated garment
+        # has to have one added by hand. That is deliberate: defaulting it would
+        # let a sleeveless garment silently keep its arms behind the fabric.
+        if "occluders" not in raw_anchors:
+            raise ValueError(
+                f"Calibration file for {image_path} has no \"occluders\" list. Add e.g. "
+                f'"occluders": ["hands", "face", "hair"] - plus "arms" if it is sleeveless.'
+            )
+
         self.anchors = {name: np.float32(raw_anchors[name]) for name in POINT_NAMES}
+        self.occluders = raw_anchors["occluders"]
         self.segments = self._build_segments()
 
     def _build_segments(self):

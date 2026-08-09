@@ -156,10 +156,12 @@ smoother = garment_overlay.LandmarkSmoother(alpha=0.4)
 frame_ms = 1000 / config.CAPTURE_FPS   # smoothed; the raw per-frame number is unreadable jitter
 show_debug = False
 fullscreen = True
+relight = True
 name_frames = 0
 frames = 0
 
-print("keys: <- -> garment   1-9 pick   d debug   s dump frame   f fullscreen   q / Esc quit", flush=True)
+print("keys: <- -> garment   1-9 pick   d debug   l relight   s dump frame   "
+      "f fullscreen   q / Esc quit", flush=True)
 
 with vision.PoseLandmarker.create_from_options(options) as landmarker:
     cap = open_camera()
@@ -212,7 +214,9 @@ with vision.PoseLandmarker.create_from_options(options) as landmarker:
             h, w = frame.shape[:2]
             body_points = garment_overlay.get_body_points(result.pose_landmarks[0], w, h)
             if body_points is not None:
-                frame = garment_overlay.warp_and_blend(frame, garment, smoother.update(body_points))
+                frame = garment_overlay.warp_and_blend(
+                    frame, garment, smoother.update(body_points),
+                    light_from=clean if relight else None)
                 t = mark("warp", t)
 
                 if frames % config.PARSER_EVERY_N == 0:
@@ -266,6 +270,9 @@ with vision.PoseLandmarker.create_from_options(options) as landmarker:
             name_frames = NAME_FLASH_FRAMES
         elif key == ord('d'):
             show_debug = not show_debug
+        elif key == ord('l'):
+            relight = not relight
+            print(f"relight {'on' if relight else 'off'}", flush=True)
         elif key == ord('s'):
             dump_debug(clean, latest_class_map[0], shown)
         elif key == ord('f'):

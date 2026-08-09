@@ -403,6 +403,8 @@ def _composite_segment_over(canvas_premult, canvas_alpha, seg_rgba, bbox, M):
     Warp seg_rgba (already cropped + masked to just this segment) with the
     rigid transform M, and alpha-composite it "over" the accumulated
     canvas at the right location, clipped to the canvas bounds.
+
+    Returns the canvas rect it wrote to, or None if it wrote nothing.
     """
     frame_h, frame_w = canvas_alpha.shape[:2]
     x0, y0, x1, y1 = bbox
@@ -416,7 +418,7 @@ def _composite_segment_over(canvas_premult, canvas_alpha, seg_rgba, bbox, M):
     dy1 = int(np.ceil(transformed[:, 1].max()))
     dw, dh = max(dx1 - dx0, 1), max(dy1 - dy0, 1)
     if dw > frame_w * 4 or dh > frame_h * 4:
-        return  # sanity guard against a degenerate transform blowing up the canvas size
+        return None  # sanity guard against a degenerate transform blowing up the canvas size
 
     # Shift M so it maps seg_rgba's own local (0,0)-origin coords directly
     # into the destination bbox's local coords.
@@ -433,7 +435,7 @@ def _composite_segment_over(canvas_premult, canvas_alpha, seg_rgba, bbox, M):
     cx0, cy0 = max(dx0, 0), max(dy0, 0)
     cx1, cy1 = min(dx0 + dw, frame_w), min(dy0 + dh, frame_h)
     if cx1 <= cx0 or cy1 <= cy0:
-        return
+        return None
     lx0, ly0 = cx0 - dx0, cy0 - dy0
     lx1, ly1 = cx1 - dx0, cy1 - dy0
 
@@ -446,18 +448,55 @@ def _composite_segment_over(canvas_premult, canvas_alpha, seg_rgba, bbox, M):
     a = patch_alpha[:, :, None]
     region_premult[:] = patch_rgb * a + region_premult * (1 - a)
     region_alpha[:] = patch_alpha + region_alpha * (1 - patch_alpha)
+    return cx0, cy0, cx1, cy1
 
 
-def warp_and_blend(frame_bgr: np.ndarray, garment: Garment, named_dst_points: dict) -> np.ndarray:
+LIGHT_SCALE = 8        # fit at 1/8 resolution
+LIGHT_GAIN_MIN = 0.7   # widen the pair for a stronger effect
+LIGHT_GAIN_MAX = 1.3
+
+
+def lighting_gain(frame_bgr: np.ndarray, garment_alpha: np.ndarray):
+    """Brightness multiplier putting the room's light back on the garment, None
+    if it covers nothing. A plane, not a blur - a blur would reproduce the albedo
+    underneath and blow the sleeves out."""
+    h, w = garment_alpha.shape
+    sw, sh = w // LIGHT_SCALE, h // LIGHT_SCALE
+
+    tiny = cv2.resize(frame_bgr, (sw, sh), interpolation=cv2.INTER_AREA)
+    gray = cv2.cvtColor(tiny, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    weight = cv2.resize(garment_alpha, (sw, sh), interpolation=cv2.INTER_AREA)
+    if weight.sum() < 1.0:
+        return None
+
+    ys, xs = np.mgrid[0:sh, 0:sw]
+    basis = np.stack([np.ones(sh * sw), (xs / sw * 2 - 1).ravel(), (ys / sh * 2 - 1).ravel()],
+                     axis=1).astype(np.float32)
+    weighted = basis * weight.reshape(-1, 1)
+    coeffs, *_ = np.linalg.lstsq(weighted.T @ basis, weighted.T @ gray.ravel(), rcond=None)
+    fitted = (basis @ coeffs).reshape(sh, sw)
+
+    mean = float((fitted * weight).sum() / weight.sum())
+    if mean < 1e-3:
+        return None
+    gain = np.clip(fitted / mean, LIGHT_GAIN_MIN, LIGHT_GAIN_MAX)
+    return cv2.resize(gain, (w, h), interpolation=cv2.INTER_LINEAR)
+
+
+def warp_and_blend(frame_bgr: np.ndarray, garment: Garment, named_dst_points: dict,
+                   light_from: np.ndarray = None) -> np.ndarray:
     """
     Warp each of the garment's 5 rigid segments (whichever have all their
     required live points currently tracked) with its own rotation+scale
     transform, layering them in SEGMENT_DRAW_ORDER, then alpha-blend the
     result onto frame_bgr. Returns a new frame; does not mutate frame_bgr.
+
+    light_from: clean camera frame to relight against, or None to skip.
     """
     h, w = frame_bgr.shape[:2]
     canvas_premult = np.zeros((h, w, 3), dtype=np.float32)
     canvas_alpha = np.zeros((h, w), dtype=np.float32)
+    drawn = None   # union of every segment's rect; the canvas is empty outside it
 
     for name in SEGMENT_DRAW_ORDER:
         seg = garment.segments.get(name)
@@ -473,8 +512,19 @@ def warp_and_blend(frame_bgr: np.ndarray, garment: Garment, named_dst_points: di
             M = fit_affine_transform(seg["src_points"], dst_points)
         else:
             M = fit_similarity_transform(seg["src_points"], dst_points)
-        _composite_segment_over(canvas_premult, canvas_alpha, seg["rgba"], seg["bbox"], M)
+        rect = _composite_segment_over(canvas_premult, canvas_alpha, seg["rgba"], seg["bbox"], M)
+        if rect is not None:
+            drawn = rect if drawn is None else (
+                min(drawn[0], rect[0]), min(drawn[1], rect[1]),
+                max(drawn[2], rect[2]), max(drawn[3], rect[3]))
+
+    if light_from is not None and drawn is not None:
+        gain = lighting_gain(light_from, canvas_alpha)
+        if gain is not None:
+            x0, y0, x1, y1 = drawn
+            canvas_premult[y0:y1, x0:x1] *= gain[y0:y1, x0:x1, None]
 
     alpha = canvas_alpha[:, :, None]
     blended = canvas_premult + frame_bgr.astype(np.float32) * (1 - alpha)
-    return blended.astype(np.uint8)
+    # Clip: a gain above 1 can push premultiplied RGB past 255, which wraps.
+    return np.clip(blended, 0, 255).astype(np.uint8)

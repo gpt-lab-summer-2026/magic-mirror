@@ -1,11 +1,14 @@
 """
 The window and the shape of what goes in it.
 
-Two aspects have to agree here: the crop the frame is cut to, and the window
-that crop is painted into. They are both derived from DISPLAY_ASPECT, because
-nothing in OpenCV enforces the match - see apply_window_size.
+The frame is cropped to DISPLAY_ASPECT once, then letterboxed into whatever
+size the window currently is - which starts at DISPLAY_ASPECT but the user
+can drag to anything. WINDOW_KEEPRATIO is 0 in this build and the Win32
+backend has no letterbox of its own, so show() does the letterboxing by hand
+every frame rather than relying on the window shape matching the image.
 """
 import cv2
+import numpy as np
 
 WINDOW = "Magic Mirror"
 
@@ -13,10 +16,7 @@ WINDOW = "Magic Mirror"
 # mostly black bars, so the frame gets centre-cropped to this aspect instead.
 DISPLAY_ASPECT = 9 / 16
 
-# Height of the desktop window. Fullscreen anywhere but the rig would stretch
-# the 9:16 crop to the screen's aspect: WINDOW_KEEPRATIO is 0 in this build and
-# the Win32 backend has no letterbox, so a WINDOW_NORMAL window always scales
-# the image to fill it. Sizing the window to the image is what keeps it 9:16.
+# Height of the desktop window at startup and after leaving fullscreen.
 WINDOW_HEIGHT = 900
 
 
@@ -26,7 +26,9 @@ def create_window(fullscreen):
 
 
 def apply_window_size(fullscreen):
-    """Fullscreen, or a portrait window the same shape as the cropped frame."""
+    """Fullscreen, or a portrait window the same shape as the cropped frame.
+    The user can still drag either one to another shape afterwards - show()
+    letterboxes to whatever the window ends up being."""
     cv2.setWindowProperty(WINDOW, cv2.WND_PROP_FULLSCREEN,
                           cv2.WINDOW_FULLSCREEN if fullscreen else cv2.WINDOW_NORMAL)
     if not fullscreen:
@@ -44,5 +46,25 @@ def crop_to_display(frame):
     return frame[:, x0:x0 + crop_w]
 
 
+def _letterbox(frame, target_w, target_h):
+    """Scale frame to fit inside target_w x target_h without distorting it,
+    padding the leftover area with black bars."""
+    h, w = frame.shape[:2]
+    scale = min(target_w / w, target_h / h)
+    new_w, new_h = max(1, round(w * scale)), max(1, round(h * scale))
+    resized = cv2.resize(frame, (new_w, new_h))
+
+    canvas = np.zeros((target_h, target_w, 3), dtype=frame.dtype)
+    x0, y0 = (target_w - new_w) // 2, (target_h - new_h) // 2
+    canvas[y0:y0 + new_h, x0:x0 + new_w] = resized
+    return canvas
+
+
 def show(frame):
-    cv2.imshow(WINDOW, frame)
+    # (x, y, w, h) of the window's client area - w/h is 0 before the window is
+    # first mapped, and Windows sometimes reports it as such transiently.
+    _, _, win_w, win_h = cv2.getWindowImageRect(WINDOW)
+    if win_w <= 0 or win_h <= 0:
+        cv2.imshow(WINDOW, frame)
+        return
+    cv2.imshow(WINDOW, _letterbox(frame, win_w, win_h))

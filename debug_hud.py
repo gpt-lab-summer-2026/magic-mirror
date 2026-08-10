@@ -1,9 +1,6 @@
 """
 Everything the `d` key draws, and the stopwatch behind it.
 
-None of this changes the picture the demo shows. It lives here so the render
-loop in main.py reads as the pipeline it is, instead of a pipeline with a
-stopwatch wedged between every step.
 """
 import time
 
@@ -17,7 +14,7 @@ ages = {}      # what we composited with -> how old it was, in ms
 HUD_COLOR = (0, 255, 255)
 SKELETON_COLOR = (0, 255, 0)
 
-# Broken into short lines rather than main.py's one long line - the display is
+# Broken into short lines as the display is
 # a narrow portrait crop, not a terminal.
 KEY_HELP_LINES = [
     "<- -> garment   1-9 pick",
@@ -47,9 +44,9 @@ def draw_skeleton(frame, all_pose_landmarks):
 
 
 def draw_hud(shown, frame_ms):
-    """Stage costs, the frame total, and how stale what we drew with was."""
+    """Stage costs, the frame total, and how stale what was drawn with."""
     # `stages` vs `total` is the gap: pose inference and everything else the
-    # loop waits on but does not time. `parser` is outside the sum - it runs on
+    # loop waits on but not time. `parser` is outside the sum - it runs on
     # its own thread and costs this frame nothing.
     lines = [f"{stage} {ms:5.1f} ms" for stage, ms in timings.items()]
     lines.append(f"stages {sum(ms for s, ms in timings.items() if s != 'parser'):5.1f} ms")
@@ -71,9 +68,7 @@ def draw_hud(shown, frame_ms):
 
 
 def draw_hint(shown):
-    """Small always-on reminder that the debug menu exists, top-right corner
-    so it never collides with the name flash (bottom-left) or the HUD itself
-    (top-left / bottom-left) once `d` is pressed."""
+    """Small always-on reminder that the debug menu exists"""
     text_w = cv2.getTextSize(HINT_TEXT, cv2.FONT_HERSHEY_SIMPLEX, 0.35, 1)[0][0]
     x = shown.shape[1] - text_w - 15
     cv2.putText(shown, HINT_TEXT, (x, 20),

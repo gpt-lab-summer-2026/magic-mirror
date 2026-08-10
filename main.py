@@ -1,5 +1,3 @@
-import os
-import sys
 import threading
 import time
 
@@ -7,19 +5,15 @@ import cv2
 import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
-from mediapipe.tasks.python.vision import drawing_utils, drawing_styles
 
+import camera
 import composite
 import config
+import debug_hud
+import display
 import garment_overlay
 import garment_library
-import human_parser
-
-WINDOW = "Magic Mirror"
-
-# The demo screen is a rotated monitor: a 16:9 frame letterboxed into it is
-# mostly black bars, so the frame gets centre-cropped to this aspect instead.
-DISPLAY_ASPECT = 9 / 16
+import parser_thread
 
 # waitKeyEx codes for the arrows, Linux/Qt then Windows. They have no 8-bit
 # form, which is why the loop reads waitKeyEx and never masks with 0xFF -
@@ -32,105 +26,11 @@ NAME_FLASH_FRAMES = 45   # ~1.5 s at 30 fps
 latest_result = (None, 0)       # (pose result, timestamp of the frame it describes)
 latest_result_lock = threading.Lock()
 
-latest_class_map = (None, 0)    # (class map, timestamp of the frame it describes)
-latest_class_map_lock = threading.Lock()
-parser_frame = None        # (frame, timestamp) waiting for the worker
-parser_frame_lock = threading.Lock()
-
-timings = {}   # stage -> last frame's milliseconds, drawn by `d`
-ages = {}      # what we composited with -> how old it was, in ms
-
 
 def store_result(result: vision.PoseLandmarkerResult, output_image: mp.Image, timestamp_ms: int):
     global latest_result
     with latest_result_lock:
         latest_result = (result, timestamp_ms)
-
-
-def parse_worker():
-    """Latest frame wins: a frame handed over while this is busy replaces the
-    pending one rather than joining a queue, so the map is always the freshest
-    the parser could have finished - never a backlog of stale ones.
-
-    The only thread that touches the torch model.
-    """
-    global latest_class_map, parser_frame
-    while True:
-        with parser_frame_lock:
-            pending, parser_frame = parser_frame, None
-        if pending is None:
-            time.sleep(0.005)   # nothing pending; spinning here would cost a core
-            continue
-        frame, stamp = pending
-        start = time.perf_counter()
-        class_map = human_parser.parse(parser_model, parser_processor, frame)
-        mark("parser", start)
-        with latest_class_map_lock:
-            latest_class_map = (class_map, stamp)
-
-
-def mark(stage, since):
-    """Record ms since `since` and return a fresh mark for the next stage."""
-    now = time.perf_counter()
-    timings[stage] = (now - since) * 1000
-    return now
-
-
-def dump_debug(clean, class_map, shown):
-    """Freeze one frame to ignore/ for reading the artifact off disk afterwards.
-
-    The class map is written raw - 0..17, near black to look at - so it can be
-    inspected per class rather than guessed at from a colour ramp.
-    """
-    cv2.imwrite("ignore/debug_clean.png", clean)
-    cv2.imwrite("ignore/debug_shown.png", shown)
-    if class_map is not None:
-        cv2.imwrite("ignore/debug_classes.png", class_map)
-    print("wrote ignore/debug_clean.png, debug_shown.png, debug_classes.png", flush=True)
-
-
-def open_camera():
-    """The rig's camera when its by-id link resolves, else config.CAMERA_INDEX."""
-    device = os.path.realpath(config.CAMERA_BY_ID)
-    is_rig = device.startswith("/dev/video")
-    index = int(device.removeprefix("/dev/video")) if is_rig else config.CAMERA_INDEX
-
-    cap = cv2.VideoCapture(index)
-    if not cap.isOpened():
-        sys.exit(f"Could not open camera {index}. The demo runs from the machine's own "
-                 "desktop session - over SSH the camera is not reachable.")
-
-    if is_rig:
-        # FOURCC first: it sets the bandwidth budget, and only MJPG fits a full
-        # frame on this USB 2.0 bus. Set it after the size and the driver has
-        # already picked a size for the format it was previously in. Both are
-        # facts about this camera, so any other one keeps its driver defaults.
-        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAPTURE_SIZE[0])
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAPTURE_SIZE[1])
-        cap.set(cv2.CAP_PROP_FPS, config.CAPTURE_FPS)
-    # 2, not 1: with a single buffer the driver has nowhere to put frame N+1
-    # while we hold frame N, and the capture rate halves - measured 15 vs 30.
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
-
-    # A driver silently substitutes a mode it does support, so print what we
-    # actually got rather than what we asked for.
-    fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
-    codec = "".join(chr((fourcc >> 8 * i) & 0xFF) for i in range(4))
-    width, height = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    print(f"Camera {index}: {codec} {width}x{height} @ {cap.get(cv2.CAP_PROP_FPS):.0f} fps", flush=True)
-    return cap
-
-
-def crop_to_display(frame):
-    """Centre-crop to the screen's aspect. Pose runs on the full frame, so an
-    arm outside the crop keeps tracking - it just isn't shown."""
-    h, w = frame.shape[:2]
-    crop_w = int(h * DISPLAY_ASPECT)
-    if crop_w >= w:
-        return frame
-    x0 = (w - crop_w) // 2
-    return frame[:, x0:x0 + crop_w]
 
 
 options = vision.PoseLandmarkerOptions(
@@ -142,27 +42,18 @@ garment_library.load()
 print(f"Loaded {len(garment_library.GARMENTS)} garments: "
       f"{', '.join(g.name for g in garment_library.GARMENTS)}", flush=True)
 
-# GPU or not at all: 1.5 s per frame on CPU, and it starves the render loop.
-use_parser = human_parser.gpu_available()
+use_parser = parser_thread.available()
 if use_parser:
-    parser_model, parser_processor = human_parser.load_parser()
-    labels = human_parser.class_indices(parser_model)
-    print(f"Parser on {parser_model.device}, classes: {', '.join(sorted(labels))}", flush=True)
+    labels = parser_thread.start()
     for g in garment_library.GARMENTS:
         g.occluder_lut = composite.resolve_occluders(g, labels)
-
-    # daemon: `q` must end the process even if the parser is mid-inference. The
-    # worker holds no file or socket and its class map is throwaway, so there is
-    # nothing a clean shutdown would protect - and a join() on a wedged torch call
-    # is exactly the kiosk that needs Ctrl-C.
-    threading.Thread(target=parse_worker, daemon=True).start()
 else:
     print("No GPU: parser off, so garments draw over hands and bare arms.", flush=True)
 
 smoother = garment_overlay.LandmarkSmoother(alpha=0.4)
 frame_ms = 1000 / config.CAPTURE_FPS   # smoothed; the raw per-frame number is unreadable jitter
 show_debug = False
-fullscreen = True
+fullscreen = config.ON_RIG
 relight = True
 name_frames = 0
 frames = 0
@@ -171,9 +62,8 @@ print("keys: <- -> garment   1-9 pick   d debug   l relight   s dump frame   "
       "f fullscreen   q / Esc quit", flush=True)
 
 with vision.PoseLandmarker.create_from_options(options) as landmarker:
-    cap = open_camera()
-    cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
-    cv2.setWindowProperty(WINDOW, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    cap = camera.open_camera()
+    display.create_window(fullscreen)
     start_time = time.time()
 
     while cap.isOpened():
@@ -182,7 +72,7 @@ with vision.PoseLandmarker.create_from_options(options) as landmarker:
         if not success:
             print("Ignoring empty camera frame.")
             break
-        t = mark("decode", loop_start)
+        t = debug_hud.mark("decode", loop_start)
         frames += 1
 
         # Mirror once, at the source: flip at display time instead and
@@ -200,21 +90,15 @@ with vision.PoseLandmarker.create_from_options(options) as landmarker:
 
         with latest_result_lock:
             result, result_ms = latest_result
-        ages["pose"] = now_ms - result_ms
+        debug_hud.ages["pose"] = now_ms - result_ms
         has_pose = result is not None and bool(result.pose_landmarks)
 
         if has_pose and show_debug:
-            for pose_landmarks in result.pose_landmarks:
-                drawing_utils.draw_landmarks(
-                    image=frame,
-                    landmark_list=pose_landmarks,
-                    connections=vision.PoseLandmarksConnections.POSE_LANDMARKS,
-                    landmark_drawing_spec=drawing_styles.get_default_pose_landmarks_style(),
-                    connection_drawing_spec=drawing_utils.DrawingSpec(color=(0, 255, 0), thickness=2))
+            debug_hud.draw_skeleton(frame, result.pose_landmarks)
         # Submit cost, not inference: detect_async queues and returns, and the
         # model runs on MediaPipe's own thread. On 4 cores that thread competes
         # with this loop, so its real cost lands in `total`, not here.
-        t = mark("pose", t)
+        t = debug_hud.mark("pose", t)
 
         garment = garment_library.current()
         if has_pose and garment is not None:
@@ -224,44 +108,31 @@ with vision.PoseLandmarker.create_from_options(options) as landmarker:
                 frame = garment_overlay.warp_and_blend(
                     frame, garment, smoother.update(body_points),
                     light_from=clean if relight else None)
-                t = mark("warp", t)
+                t = debug_hud.mark("warp", t)
 
                 if use_parser:
                     if frames % config.PARSER_EVERY_N == 0:
                         # `clean` is a fresh copy every frame and nothing writes into
                         # it - warp_and_blend returns a new frame rather than mutating
                         # this one - so the worker can read it while the loop draws on.
-                        with parser_frame_lock:
-                            parser_frame = (clean, now_ms)
-                    with latest_class_map_lock:
-                        class_map, class_map_ms = latest_class_map
-                    ages["map"] = now_ms - class_map_ms
+                        parser_thread.submit(clean, now_ms)
+                    class_map, class_map_ms = parser_thread.latest()
+                    debug_hud.ages["map"] = now_ms - class_map_ms
                     # A map sized to a different frame would index out of bounds.
                     # Skipping the composite for one frame beats taking the kiosk down.
                     if class_map is not None and class_map.shape == frame.shape[:2]:
                         frame = composite.apply_occluders(frame, clean, class_map, garment.occluder_lut)
-                    t = mark("occlude", t)
+                    t = debug_hud.mark("occlude", t)
 
-        shown = crop_to_display(frame)
+        shown = display.crop_to_display(frame)
         if name_frames > 0 and garment is not None:
             name_frames -= 1
             cv2.putText(shown, garment.name, (20, shown.shape[0] - 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
         if show_debug:
-            # `stages` vs `total` is the gap: pose inference and everything else
-            # this loop waits on but does not time. `parser` is outside the sum -
-            # it runs on its own thread and costs this frame nothing.
-            hud = [f"{stage} {ms:5.1f} ms" for stage, ms in timings.items()]
-            hud.append(f"stages {sum(ms for s, ms in timings.items() if s != 'parser'):5.1f} ms")
-            hud.append(f"total  {frame_ms:5.1f} ms   {1000 / frame_ms:4.1f} fps")
-            # How stale what we drew with was, which the stage costs cannot show:
-            # a starved pose thread still submits in 2 ms, it just answers late.
-            hud += [f"{what} age {ms:5.0f} ms" for what, ms in ages.items()]
-            for i, line in enumerate(hud):
-                cv2.putText(shown, line, (20, 30 + i * 26),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-        cv2.imshow(WINDOW, shown)
-        mark("display", t)
+            debug_hud.draw_hud(shown, frame_ms)
+        display.show(shown)
+        debug_hud.mark("display", t)
 
         key = cv2.waitKeyEx(1)
         frame_ms = 0.6 * frame_ms + 0.4 * (time.perf_counter() - loop_start) * 1000
@@ -282,11 +153,10 @@ with vision.PoseLandmarker.create_from_options(options) as landmarker:
             relight = not relight
             print(f"relight {'on' if relight else 'off'}", flush=True)
         elif key == ord('s'):
-            dump_debug(clean, latest_class_map[0], shown)
+            debug_hud.dump_frame(clean, parser_thread.latest()[0], shown)
         elif key == ord('f'):
             fullscreen = not fullscreen
-            cv2.setWindowProperty(WINDOW, cv2.WND_PROP_FULLSCREEN,
-                                  cv2.WINDOW_FULLSCREEN if fullscreen else cv2.WINDOW_NORMAL)
+            display.apply_window_size(fullscreen)
 
     cap.release()
     cv2.destroyAllWindows()

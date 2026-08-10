@@ -5,11 +5,12 @@ from mediapipe.tasks.python.vision import drawing_utils
 from mediapipe.tasks.python.vision import drawing_styles
 from mediapipe.tasks.python import vision
 import cv2
+import config
 
 # This code draws pose landmarks on a singular image, use a test pose image from the test-images folder.
 
 # Create an PoseLandmarker object.
-base_options = python.BaseOptions(model_asset_path='pose_landmarker.task')
+base_options = python.BaseOptions(model_asset_path=config.POSE_MODEL)
 options = vision.PoseLandmarkerOptions(
     base_options=base_options,
     output_segmentation_masks=True)

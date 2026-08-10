@@ -10,6 +10,10 @@ from transformers import SegformerImageProcessor, SegformerForSemanticSegmentati
 MODEL_ID = 'fashn-ai/fashn-human-parser'
 
 
+def gpu_available():
+    return torch.cuda.is_available()
+
+
 def load_parser():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     processor = SegformerImageProcessor.from_pretrained(MODEL_ID)

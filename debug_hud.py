@@ -17,6 +17,16 @@ ages = {}      # what we composited with -> how old it was, in ms
 HUD_COLOR = (0, 255, 255)
 SKELETON_COLOR = (0, 255, 0)
 
+# Broken into short lines rather than main.py's one long line - the display is
+# a narrow portrait crop, not a terminal.
+KEY_HELP_LINES = [
+    "<- -> garment   1-9 pick",
+    "s dump frame   f fullscreen",
+    "l relight   q / Esc quit",
+]
+
+HINT_TEXT = "d to toggle debug menu"
+
 
 def mark(stage, since):
     """Record ms since `since` and return a fresh mark for the next stage."""
@@ -51,6 +61,23 @@ def draw_hud(shown, frame_ms):
     for i, line in enumerate(lines):
         cv2.putText(shown, line, (20, 30 + i * 26),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, HUD_COLOR, 2)
+
+    # Anchored to the bottom so it doesn't collide with however long the
+    # stage/age list above grows.
+    bottom = shown.shape[0]
+    for i, line in enumerate(reversed(KEY_HELP_LINES)):
+        cv2.putText(shown, line, (20, bottom - 20 - i * 26),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, HUD_COLOR, 2)
+
+
+def draw_hint(shown):
+    """Small always-on reminder that the debug menu exists, top-right corner
+    so it never collides with the name flash (bottom-left) or the HUD itself
+    (top-left / bottom-left) once `d` is pressed."""
+    text_w = cv2.getTextSize(HINT_TEXT, cv2.FONT_HERSHEY_SIMPLEX, 0.35, 1)[0][0]
+    x = shown.shape[1] - text_w - 15
+    cv2.putText(shown, HINT_TEXT, (x, 20),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.35, HUD_COLOR, 1)
 
 
 def dump_frame(clean, class_map, shown):

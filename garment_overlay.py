@@ -7,9 +7,9 @@ Unlike the earlier TPS approach, each segment can only rotate and rescale
 around its own joints — it structurally cannot stretch or fill in, since a
 similarity transform has no freedom to change shape, only orientation and
 size. Which garment pixels belong to which segment is worked out
-automatically from the existing 7 calibrated points (no new points to
-click): every opaque pixel is assigned to whichever bone line (or the
-torso triangle) it's geometrically closest to.
+automatically from the existing 7 calibrated points: every opaque pixel is 
+assigned to whichever bone line (or the torso triangle) it's geometrically 
+closest to.
 """
 import json
 from pathlib import Path

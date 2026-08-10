@@ -21,6 +21,18 @@ WINDOW = "Magic Mirror"
 # mostly black bars, so the frame gets centre-cropped to this aspect instead.
 DISPLAY_ASPECT = 9 / 16
 
+# The rig's by-id link resolves on the demo machine and nowhere else, so it
+# answers both questions at once: which camera to open, and whether the screen
+# is the rotated portrait one. They are the same machine.
+RIG_DEVICE = os.path.realpath(config.CAMERA_BY_ID)
+ON_RIG = RIG_DEVICE.startswith("/dev/video")
+
+# Height of the desktop window. Fullscreen anywhere but the rig would stretch
+# the 9:16 crop to the screen's aspect: WINDOW_KEEPRATIO is 0 in this build and
+# the Win32 backend has no letterbox, so a WINDOW_NORMAL window always scales
+# the image to fill it. Sizing the window to the image is what keeps it 9:16.
+WINDOW_HEIGHT = 900
+
 # waitKeyEx codes for the arrows, Linux/Qt then Windows. They have no 8-bit
 # form, which is why the loop reads waitKeyEx and never masks with 0xFF -
 # 65361 & 0xFF is ord('Q').
@@ -91,16 +103,14 @@ def dump_debug(clean, class_map, shown):
 
 def open_camera():
     """The rig's camera when its by-id link resolves, else config.CAMERA_INDEX."""
-    device = os.path.realpath(config.CAMERA_BY_ID)
-    is_rig = device.startswith("/dev/video")
-    index = int(device.removeprefix("/dev/video")) if is_rig else config.CAMERA_INDEX
+    index = int(RIG_DEVICE.removeprefix("/dev/video")) if ON_RIG else config.CAMERA_INDEX
 
     cap = cv2.VideoCapture(index)
     if not cap.isOpened():
         sys.exit(f"Could not open camera {index}. The demo runs from the machine's own "
                  "desktop session - over SSH the camera is not reachable.")
 
-    if is_rig:
+    if ON_RIG:
         # FOURCC first: it sets the bandwidth budget, and only MJPG fits a full
         # frame on this USB 2.0 bus. Set it after the size and the driver has
         # already picked a size for the format it was previously in. Both are
@@ -133,6 +143,14 @@ def crop_to_display(frame):
     return frame[:, x0:x0 + crop_w]
 
 
+def apply_window_size(fullscreen):
+    """Fullscreen, or a portrait window the same shape as the cropped frame."""
+    cv2.setWindowProperty(WINDOW, cv2.WND_PROP_FULLSCREEN,
+                          cv2.WINDOW_FULLSCREEN if fullscreen else cv2.WINDOW_NORMAL)
+    if not fullscreen:
+        cv2.resizeWindow(WINDOW, round(WINDOW_HEIGHT * DISPLAY_ASPECT), WINDOW_HEIGHT)
+
+
 options = vision.PoseLandmarkerOptions(
     base_options=python.BaseOptions(model_asset_path=config.POSE_MODEL),
     running_mode=vision.RunningMode.LIVE_STREAM,
@@ -162,7 +180,7 @@ else:
 smoother = garment_overlay.LandmarkSmoother(alpha=0.4)
 frame_ms = 1000 / config.CAPTURE_FPS   # smoothed; the raw per-frame number is unreadable jitter
 show_debug = False
-fullscreen = True
+fullscreen = ON_RIG
 relight = True
 name_frames = 0
 frames = 0
@@ -172,8 +190,8 @@ print("keys: <- -> garment   1-9 pick   d debug   l relight   s dump frame   "
 
 with vision.PoseLandmarker.create_from_options(options) as landmarker:
     cap = open_camera()
-    cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
-    cv2.setWindowProperty(WINDOW, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL)
+    apply_window_size(fullscreen)
     start_time = time.time()
 
     while cap.isOpened():
@@ -285,8 +303,7 @@ with vision.PoseLandmarker.create_from_options(options) as landmarker:
             dump_debug(clean, latest_class_map[0], shown)
         elif key == ord('f'):
             fullscreen = not fullscreen
-            cv2.setWindowProperty(WINDOW, cv2.WND_PROP_FULLSCREEN,
-                                  cv2.WINDOW_FULLSCREEN if fullscreen else cv2.WINDOW_NORMAL)
+            apply_window_size(fullscreen)
 
     cap.release()
     cv2.destroyAllWindows()

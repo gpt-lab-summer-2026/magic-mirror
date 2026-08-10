@@ -58,9 +58,6 @@ relight = True
 name_frames = 0
 frames = 0
 
-print("keys: <- -> garment   1-9 pick   d debug   l relight   s dump frame   "
-      "f fullscreen   q / Esc quit", flush=True)
-
 with vision.PoseLandmarker.create_from_options(options) as landmarker:
     cap = camera.open_camera()
     display.create_window(fullscreen)
@@ -131,6 +128,7 @@ with vision.PoseLandmarker.create_from_options(options) as landmarker:
                         cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
         if show_debug:
             debug_hud.draw_hud(shown, frame_ms)
+        debug_hud.draw_hint(shown)
         display.show(shown)
         debug_hud.mark("display", t)
 

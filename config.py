@@ -4,6 +4,7 @@ Machine constants: which camera, what it captures, which model file.
 Geometry constants stay in garment_overlay.py next to the code that reads
 them - a copy here would be a second source of truth, not a tidier one.
 """
+import os
 
 # /dev/videoN is handed out in plug order, so a reboot or a second camera can
 # move the index with no error. This link always points at the demo camera.
@@ -11,6 +12,12 @@ CAMERA_BY_ID = "/dev/v4l/by-id/usb-SHENZHEN_AONI_ELECTRONIC_CO._LTD_UHD_4K_Camer
 
 # Used wherever that link does not resolve - any other machine, and Windows.
 CAMERA_INDEX = 0
+
+# The link resolves on the demo machine and nowhere else, so it answers both
+# questions at once: which camera to open, and whether the screen is the
+# rotated portrait one. They are the same machine.
+RIG_DEVICE = os.path.realpath(CAMERA_BY_ID)
+ON_RIG = RIG_DEVICE.startswith("/dev/video")
 
 # 4:3, not 16:9: on a portrait screen the 9:16 crop keeps 540 of these 1280
 # columns where 1280x720 would keep 405. MJPG only - YUYV tops out at 10fps

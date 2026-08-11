@@ -5,7 +5,7 @@ import sys
 import cv2
 import numpy as np
 
-
+# this currently handles tops, I'd add only hands for bottoms?
 def resolve_occluders(garment, labels):
     """Occluder names from .anchors.json -> a 256-entry LUT, 255 where that class
     sits in front. Exits on a typo: an unmatched name silently disables occlusion."""

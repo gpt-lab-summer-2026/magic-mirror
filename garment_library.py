@@ -10,22 +10,30 @@ from pathlib import Path
 
 import config
 import garment_overlay
+import garment_overlay_bottom
 
 GARMENTS = []
 _index = 0
 
 
 def load(directory: str = config.GARMENT_DIR):
-    """Every .png with a matching .anchors.json, in filename order."""
+    """
+    Every .png with a matching .anchors.json, in filename order.
+    Tops and bottoms are in the same folder, but the overlay code is different.
+    """
     for png in sorted(Path(directory).glob("*.png")):
         anchors = png.with_suffix(".anchors.json")
         if not anchors.exists():
             print(f"Skipping {png.name}: no {anchors.name} - run python calibrate.py {png}", flush=True)
             continue
-        garment = garment_overlay.Garment(str(png))
+        name = png.stem
+        if name.endswith("skirt") or name.endswith("pants"):
+            garment = garment_overlay_bottom.GarmentBottom(str(png))
+        else:
+            garment = garment_overlay.Garment(str(png))
         # The filename stem is the on-screen label. Garment itself has no
         # use for a name, so it is attached here instead of in the class.
-        garment.name = png.stem
+        garment.name = name
         GARMENTS.append(garment)
     return GARMENTS
 

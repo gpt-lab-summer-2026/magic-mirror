@@ -1,9 +1,9 @@
 """
 One-time calibration tool.
 
-Click points on a background-removed garment image, in this exact order
-(defined once, in garment_overlay.POINT_NAMES, so this file and the runtime
-overlay can never disagree about ordering):
+Click points on a background-removed garment image, in this exact order.
+Tops (default) - defined once in garment_overlay.POINT_NAMES, so this file
+and the runtime overlay can never disagree about ordering:
   1. Left shoulder
   2. Right shoulder
   3. Hip center   (roughly where the hips would sit, centered horizontally)
@@ -12,15 +12,25 @@ overlay can never disagree about ordering):
   6. Left wrist
   7. Right wrist
 
-These become the correspondences the runtime TPS warp is fit against each
+Bottoms (--bottom) - garment_overlay_bottom.POINT_NAMES_BOTTOM:
+  1. Hip center   (roughly where the waistband centers horizontally)
+  2. Left hip
+  3. Right hip
+  4. Left knee
+  5. Right knee
+  6. Left ankle
+  7. Right ankle
+
+These become the correspondences the runtime rigid warp is fit against each
 frame — whichever of these points has a currently-visible match on the
-body (shoulders + hip-center are always required; elbows/wrists are used
-opportunistically) get fed into the spline solve.
+body (shoulders/hips are always required; the rest are used
+opportunistically) get fed into the fit.
 
 Saves a sidecar JSON next to the image: <name>.anchors.json
 
 Usage:
-    python calibrate.py garments/bg_white_top.out.png
+    python calibrate.py garments/white_top.png
+    python calibrate.py garments/green.pants.png --bottom
 
     add segments and occluders by hand to the JSON if they're not there,
     garment_library.py will not run if the JSON is missing those keys.
@@ -40,15 +50,18 @@ import cv2
 import numpy as np
 
 from garment_overlay import POINT_NAMES
+from garment_overlay_bottom import POINT_NAMES_BOTTOM
 
+# Cycled by point index - tops and bottoms both calibrate exactly 7 points,
+# but this isn't load-bearing if that ever changes.
 POINT_COLORS = [
-    (0, 200, 255),    # left_shoulder - orange
-    (255, 200, 0),    # right_shoulder - cyan
-    (0, 255, 0),      # hip_center - green
-    (255, 0, 255),    # left_elbow - magenta
-    (0, 128, 255),    # right_elbow - amber
-    (255, 255, 0),    # left_wrist - yellow
-    (128, 0, 255),    # right_wrist - purple
+    (0, 200, 255),    # orange
+    (255, 200, 0),    # cyan
+    (0, 255, 0),      # green
+    (255, 0, 255),    # magenta
+    (0, 128, 255),    # amber
+    (255, 255, 0),    # yellow
+    (128, 0, 255),    # purple
 ]
 
 
@@ -69,7 +82,7 @@ def _composite_on_checkerboard(rgba, square=16):
     return rgba[:, :, :3]
 
 
-def calibrate(image_path: str) -> dict:
+def calibrate(image_path: str, point_names: list) -> dict:
     rgba = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
     if rgba is None:
         raise FileNotFoundError(f"Could not read image: {image_path}")
@@ -78,7 +91,7 @@ def calibrate(image_path: str) -> dict:
     points = []
 
     def on_mouse(event, x, y, flags, userdata):
-        if event == cv2.EVENT_LBUTTONDOWN and len(points) < len(POINT_NAMES):
+        if event == cv2.EVENT_LBUTTONDOWN and len(points) < len(point_names):
             points.append((x, y))
 
     window_name = "Calibration - click each point in order (u=undo, s=save, q=quit)"
@@ -88,12 +101,12 @@ def calibrate(image_path: str) -> dict:
     while True:
         frame = display_base.copy()
         for i, (px, py) in enumerate(points):
-            color = POINT_COLORS[i]
+            color = POINT_COLORS[i % len(POINT_COLORS)]
             cv2.circle(frame, (px, py), 6, color, -1)
-            cv2.putText(frame, POINT_NAMES[i], (px + 8, py - 8),
+            cv2.putText(frame, point_names[i], (px + 8, py - 8),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-        next_label = POINT_NAMES[len(points)] if len(points) < len(POINT_NAMES) else "all points set - press s to save"
+        next_label = point_names[len(points)] if len(points) < len(point_names) else "all points set - press s to save"
         cv2.putText(frame, f"click: {next_label}", (10, 25),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
@@ -103,16 +116,16 @@ def calibrate(image_path: str) -> dict:
         if key == ord('u') and points:
             points.pop()
         elif key == ord('s'):
-            if len(points) == len(POINT_NAMES):
+            if len(points) == len(point_names):
                 break
-            print(f"Need all {len(POINT_NAMES)} points before saving ({len(points)} placed so far).")
+            print(f"Need all {len(point_names)} points before saving ({len(points)} placed so far).")
         elif key == ord('q'):
             cv2.destroyAllWindows()
             sys.exit("Calibration cancelled.")
 
     cv2.destroyAllWindows()
 
-    return {name: list(pt) for name, pt in zip(POINT_NAMES, points)}
+    return {name: list(pt) for name, pt in zip(point_names, points)}
 
 
 def save_anchors(image_path: str, anchors: dict) -> str:
@@ -133,11 +146,16 @@ def save_anchors(image_path: str, anchors: dict) -> str:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        sys.exit("Usage: python calibrate.py path/to/garment.out.png")
+    args = sys.argv[1:]
+    is_bottom = "--bottom" in args
+    if is_bottom:
+        args.remove("--bottom")
+    if len(args) != 1:
+        sys.exit("Usage: python calibrate.py path/to/garment.out.png [--bottom]")
 
-    img_path = sys.argv[1]
-    anchors = calibrate(img_path)
+    img_path = args[0]
+    point_names = POINT_NAMES_BOTTOM if is_bottom else POINT_NAMES
+    anchors = calibrate(img_path, point_names)
     out_path = save_anchors(img_path, anchors)
     print(f"Saved anchors to: {out_path}")
     print(anchors)

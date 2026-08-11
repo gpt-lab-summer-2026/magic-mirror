@@ -8,7 +8,6 @@ lives in garment_rig.py and is imported from there.
 import numpy as np
 
 import garment_rig
-from garment_rig import LandmarkSmoother  # re-exported: main.py imports this from here
 
 # The full set of anchor points calibrate.py collects, in the order it
 # collects them in. Single source of truth — calibrate.py imports this

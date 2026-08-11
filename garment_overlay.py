@@ -3,8 +3,8 @@ Loading a calibrated garment and overlaying it on a camera frame each loop
 iteration using per-segment rigid (rotation + uniform scale, no shear)
 warps: torso, left/right upper arm, left/right forearm.
 
-Unlike the earlier TPS approach, each segment can only rotate and rescale
-around its own joints — it structurally cannot stretch or fill in, since a
+Unlike the TPS approach, each segment can only rotate and rescale around 
+its own joints — it structurally cannot stretch or fill in, since a
 similarity transform has no freedom to change shape, only orientation and
 size. Which garment pixels belong to which segment is worked out
 automatically from the existing 7 calibrated points: every opaque pixel is 
@@ -17,9 +17,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-# The full set of anchor points calibrate.py collects, in the order it
-# collects them in. Single source of truth — calibrate.py imports this
-# directly so the two files can never drift out of sync on ordering.
+# The top set of anchor points calibrate.py collects, in the order it
+# collects them in. calibrate.py imports this directly so the two files 
+# can never drift out of sync on ordering.
 POINT_NAMES = [
     "left_shoulder",
     "right_shoulder",
@@ -72,7 +72,7 @@ SEGMENT_DRAW_ORDER = ["torso", "left_upper_arm", "right_upper_arm", "left_forear
 # boundary at a shared joint, as a multiple of that segment's own typical
 # half-width. >1.0 means the rounded cap is a bit larger than the limb's
 # own thickness — like a real paper-doll rivet — which comfortably covers
-# the joint at any bend angle rather than just barely reaching it.
+# the joint at any bend angle.
 JOINT_OVERLAP_MULTIPLIER = 1.15
 
 # (segment_a, segment_b, shared joint anchor name) for every place two
@@ -184,9 +184,8 @@ def fit_affine_transform(src_pts: np.ndarray, dst_pts: np.ndarray) -> np.ndarray
 
 # Which fitting method each segment uses. Only the torso needs the
 # "correspondence-exact but structurally biggest range of motion" affine
-# fit — the arm segments deliberately stay similarity-only (rotation +
-# uniform scale, no shear) since that's what prevents the sleeve from
-# ballooning or filling in when the arm bends.
+# fit, the arm segments stay similarity-only (rotation + uniform scale, 
+# no shear), preventing the sleeve from ballooning or filling in when the arm bends.
 SEGMENT_TRANSFORM_KIND = {
     "torso": "affine",
     "left_upper_arm": "similarity",
@@ -200,8 +199,8 @@ class Garment:
     """
     A background-removed garment image, its calibrated anchor points, and
     a one-time partition of every opaque pixel into 5 rigid segments
-    (torso, left/right upper arm, left/right forearm) based purely on
-    which bone line (or the torso triangle) each pixel sits closest to.
+    (torso, left/right upper arm, left/right forearm) based on which bone 
+    line (or the torso triangle) each pixel sits closest to.
     """
 
     def __init__(self, image_path: str):
@@ -271,8 +270,7 @@ class Garment:
 
         opaque = (alpha.ravel() > 0)
 
-        # Base assignment: each pixel belongs to whichever bone (or the
-        # torso triangle) it's nearest to — no overlap yet.
+        # Base assignment: each pixel belongs to whichever bone/torso triangle nearest to — no overlap yet.
         seg_masks = {}
         half_width = {}
         for i, name in enumerate(segment_names):
@@ -354,8 +352,7 @@ def get_body_points(pose_landmarks, frame_width, frame_height):
     coordinates. Shoulders are required (returns None if either is missing
     or low-confidence). Hip-center always comes back, real if visible,
     synthesized from the shoulders otherwise. Elbows and wrists are
-    opportunistic: each is included only if that specific landmark is
-    visible this frame.
+    included only if that specific landmark is visible this frame.
     """
     lm = pose_landmarks
 
@@ -458,8 +455,7 @@ LIGHT_GAIN_MAX = 1.3
 
 def lighting_gain(frame_bgr: np.ndarray, garment_alpha: np.ndarray):
     """Brightness multiplier putting the room's light back on the garment, None
-    if it covers nothing. A plane, not a blur - a blur would reproduce the albedo
-    underneath and blow the sleeves out."""
+    if it covers nothing. A plane, not a blur - a blur would blow the sleeves out."""
     h, w = garment_alpha.shape
     sw, sh = w // LIGHT_SCALE, h // LIGHT_SCALE
 

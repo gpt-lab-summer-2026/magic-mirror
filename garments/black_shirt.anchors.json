@@ -1,31 +1,31 @@
 {
   "left_shoulder": [
-    257,
-    213
+    268,
+    179
   ],
   "right_shoulder": [
-    791,
-    207
+    784,
+    180
   ],
   "hip_center": [
-    500,
-    814
+    490,
+    918
   ],
   "left_elbow": [
-    200,
-    509
+    194,
+    594
   ],
   "right_elbow": [
-    847,
-    526
+    863,
+    577
   ],
   "left_wrist": [
-    172,
-    850
+    217,
+    1072
   ],
   "right_wrist": [
-    866,
-    924
+    886,
+    1144
   ],
   "segments": ["torso", "left_upper_arm", "right_upper_arm", "left_forearm", "right_forearm"],
   "occluders": ["hands", "face", "hair"]

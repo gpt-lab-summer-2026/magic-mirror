@@ -1,32 +1,42 @@
 {
   "left_shoulder": [
-    280,
-    324
+    282,
+    307
   ],
   "right_shoulder": [
-    800,
-    342
+    790,
+    319
   ],
   "hip_center": [
-    519,
-    701
+    506,
+    810
   ],
   "left_elbow": [
-    179,
-    581
+    161,
+    647
   ],
   "right_elbow": [
-    900,
-    597
+    912,
+    652
   ],
   "left_wrist": [
-    103,
-    831
+    93,
+    880
   ],
   "right_wrist": [
-    976,
-    862
+    985,
+    899
   ],
-  "segments": ["torso", "left_upper_arm", "right_upper_arm", "left_forearm", "right_forearm"],
-  "occluders": ["hands", "face", "hair"]
+  "segments": [
+    "torso",
+    "left_upper_arm",
+    "right_upper_arm",
+    "left_forearm",
+    "right_forearm"
+  ],
+  "occluders": [
+    "hands",
+    "face",
+    "hair"
+  ]
 }

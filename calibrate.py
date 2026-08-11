@@ -14,12 +14,13 @@ and the runtime overlay can never disagree about ordering:
 
 Bottoms (--bottom) - garment_overlay_bottom.POINT_NAMES_BOTTOM:
   1. Hip center   (roughly where the waistband centers horizontally)
-  2. Left hip
-  3. Right hip
-  4. Left knee
-  5. Right knee
-  6. Left ankle
-  7. Right ankle
+  2. Left waist   (top-left corner of the waistband)
+  3. Right waist  (top-right corner of the waistband)
+  4. Crotch       (where the legs separate - bottom tip of the seat panel)
+  5. Left knee
+  6. Right knee
+  7. Left ankle
+  8. Right ankle
 
 These become the correspondences the runtime rigid warp is fit against each
 frame — whichever of these points has a currently-visible match on the
@@ -30,7 +31,7 @@ Saves a sidecar JSON next to the image: <name>.anchors.json
 
 Usage:
     python calibrate.py garments/white_top.png
-    python calibrate.py garments/green.pants.png --bottom
+    python calibrate.py garments/green_pants.png --bottom
 
     add segments and occluders by hand to the JSON if they're not there,
     garment_library.py will not run if the JSON is missing those keys.
@@ -52,8 +53,8 @@ import numpy as np
 from garment_overlay import POINT_NAMES
 from garment_overlay_bottom import POINT_NAMES_BOTTOM
 
-# Cycled by point index - tops and bottoms both calibrate exactly 7 points,
-# but this isn't load-bearing if that ever changes.
+# Cycled by point index - long enough for the longer of the two point sets
+# (bottoms, at 8), and wraps via modulo in calibrate() if that ever grows.
 POINT_COLORS = [
     (0, 200, 255),    # orange
     (255, 200, 0),    # cyan
@@ -62,6 +63,7 @@ POINT_COLORS = [
     (0, 128, 255),    # amber
     (255, 255, 0),    # yellow
     (128, 0, 255),    # purple
+    (0, 0, 255),      # red
 ]
 
 

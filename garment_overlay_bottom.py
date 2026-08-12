@@ -17,6 +17,7 @@ and CROTCH_DROP_RATIO for the tunable knobs.
 import numpy as np
 
 import garment_rig
+from garment_rig import _point_to_segment_distance, _point_to_triangle_distance, JOINT_OVERLAP_MULTIPLIER
 
 # The full set of anchor points calibrate.py collects, in the order it
 # collects them in. calibrate.py imports this directly.
@@ -39,7 +40,10 @@ POINT_NAMES_BOTTOM = [
 
 # calibrate.py allows saving once this many points are placed, in order —
 # everything after this is optional to click, matching everything the seat
-# panel itself needs (hip_center, left_waist, right_waist, crotch).
+# panel itself needs (hip_center, left_waist, right_waist, crotch). The leg
+# points beyond that are exactly as optional to calibrate as they already
+# are to track live: a skirt's "segments" list just won't include the leg
+# segments, so nothing downstream ever needs their anchors.
 CORE_POINT_COUNT = 4
 
 # MediaPipe Pose landmark indices used below.
@@ -117,6 +121,86 @@ SEGMENT_TRANSFORM_KIND = {
 }
 
 
+# The crotch joint (leg meeting the triangular seat) needs a much bigger
+# radius than the knee joint does, on a baggy garment - the 75th
+# percentile "typical" half-width used everywhere else gets dragged down
+# by the narrower knee-ward portion of the leg, badly underestimating how
+# wide the fabric actually is right near the crotch. This percentile is
+# used ONLY for that one joint; the knee joint keeps using the standard
+# half_width (75th percentile, computed once below) exactly as before.
+CROTCH_JOINT_PERCENTILE = 95
+
+
+def _build_bottom_segments(rgba, anchors, segment_names, segment_required_points, segment_joints):
+    """
+    Bottoms-only variant of garment_rig.build_segments: identical Voronoi
+    partition and joint-overlap-disk mechanics in every respect except one -
+    the crotch joint's overlap radius. See CROTCH_JOINT_PERCENTILE.
+    Deliberately not in garment_rig.py, so tops/torso/arms are completely
+    unaffected.
+    """
+    h, w = rgba.shape[:2]
+    alpha = rgba[:, :, 3]
+    ys, xs = np.mgrid[0:h, 0:w]
+    pts = np.stack([xs.ravel(), ys.ravel()], axis=1).astype(np.float64)
+    opaque = (alpha.ravel() > 0)
+
+    def raw_distance(name):
+        required = [anchors[n] for n in segment_required_points[name]]
+        if name in TRIANGLE_SEGMENTS:
+            a, b, c = required
+            return _point_to_triangle_distance(pts, a, b, c)
+        start, end = required
+        return _point_to_segment_distance(pts, start, end)
+
+    distances = np.stack([raw_distance(name) for name in segment_names], axis=1)
+    labels = np.argmin(distances, axis=1)
+
+    seg_masks = {}
+    half_width = {}
+    half_width_at_triangle_joint = {}
+    for i, name in enumerate(segment_names):
+        mask = (labels == i) & opaque
+        seg_masks[name] = mask
+        own_dist = distances[mask, i]
+        half_width[name] = float(np.percentile(own_dist, 75)) if own_dist.size else 0.0
+        half_width_at_triangle_joint[name] = (
+            float(np.percentile(own_dist, CROTCH_JOINT_PERCENTILE)) if own_dist.size else 0.0
+        )
+
+    for seg_a, seg_b, joint_name in segment_joints:
+        if seg_a not in seg_masks or seg_b not in seg_masks:
+            continue
+        joint_point = anchors[joint_name]
+        if seg_a in TRIANGLE_SEGMENTS:
+            radius = JOINT_OVERLAP_MULTIPLIER * half_width_at_triangle_joint[seg_b]
+        elif seg_b in TRIANGLE_SEGMENTS:
+            radius = JOINT_OVERLAP_MULTIPLIER * half_width_at_triangle_joint[seg_a]
+        else:
+            radius = JOINT_OVERLAP_MULTIPLIER * min(half_width[seg_a], half_width[seg_b])
+        dist_to_joint = np.linalg.norm(pts - joint_point, axis=1)
+        near_joint = (dist_to_joint <= radius) & opaque
+        seg_masks[seg_a] = seg_masks[seg_a] | near_joint
+        seg_masks[seg_b] = seg_masks[seg_b] | near_joint
+
+    segments = {}
+    for name in segment_names:
+        seg_mask = seg_masks[name].reshape(h, w)
+        ys_idx, xs_idx = np.where(seg_mask)
+        if len(xs_idx) == 0:
+            segments[name] = None
+            continue
+        x0, y0 = int(xs_idx.min()), int(ys_idx.min())
+        x1, y1 = int(xs_idx.max()) + 1, int(ys_idx.max()) + 1
+        seg_rgba = rgba[y0:y1, x0:x1].copy()
+        local_mask = seg_mask[y0:y1, x0:x1]
+        seg_rgba[~local_mask, 3] = 0
+        required_names = segment_required_points[name]
+        src_points = np.float32([anchors[n] for n in required_names])
+        segments[name] = dict(rgba=seg_rgba, bbox=(x0, y0, x1, y1), src_points=src_points)
+    return segments
+
+
 class GarmentBottom:
     """
     A background-removed bottom garment (pants/skirt) image, its
@@ -132,9 +216,8 @@ class GarmentBottom:
             occluder_hint='"occluders": ["shoes"] for anything the garment should draw over.',
             segments_hint='["seat", "left_upper_leg", "right_upper_leg"] for shorts.',
         )
-        self.segments = garment_rig.build_segments(
+        self.segments = _build_bottom_segments(
             self.rgba, self.anchors, self.segment_names, SEGMENT_REQUIRED_POINTS, SEGMENT_JOINTS,
-            triangle_segments=TRIANGLE_SEGMENTS,
         )
 
 

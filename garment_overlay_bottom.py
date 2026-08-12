@@ -71,7 +71,7 @@ WAIST_RISE_RATIO = 0.5
 # pair of pants drapes - widen the two waist points the seat panel is fit
 # against, outward from their own midpoint, so the waist doesn't render
 # too narrow.
-SEAT_WIDTH_MULTIPLIER = 1.55
+SEAT_WIDTH_MULTIPLIER = 1.6
 
 # Crotch depth below the (already-raised) waist line.
 CROTCH_DROP_RATIO = 0.9

@@ -48,6 +48,16 @@ def _garment_class(anchors_path: Path):
     return garment_overlay.Garment
 
 
+def build(png: Path):
+    """The one place a Garment is made: picks its class from the sidecar, then names it."""
+    garment = _garment_class(png.with_suffix(".anchors.json"))(str(png))
+    # Garment has no use for either, so both are attached here rather than in the
+    # class - and here, so that nothing downstream can meet a nameless garment.
+    garment.name = png.stem
+    garment.path = png.resolve()
+    return garment
+
+
 def load(directory: str = config.GARMENT_DIR):
     """
     Every .png with a matching .anchors.json, in filename order. Which
@@ -61,16 +71,22 @@ def load(directory: str = config.GARMENT_DIR):
             print(f"Skipping {png.name}: no {anchors_path.name} - run python calibrate.py {png}", flush=True)
             continue
         try:
-            garment_class = _garment_class(anchors_path)
-            garment = garment_class(str(png))
+            GARMENTS.append(build(png))
         except (FileNotFoundError, ValueError) as e:
             print(f"Skipping {png.name}: {e}", flush=True)
-            continue
-        # The filename stem is the on-screen label. Garment itself has no
-        # use for a name, so it is attached here instead of in the class.
-        garment.name = png.stem
-        GARMENTS.append(garment)
     return GARMENTS
+
+
+def replace_or_add(garment):
+    """One slot per folder, and show it: an upload evicts the last upload, not a demo."""
+    global _index
+    for i, existing in enumerate(GARMENTS):
+        if existing.path.parent == garment.path.parent:
+            GARMENTS[i] = garment
+            _index = i
+            return
+    GARMENTS.append(garment)
+    _index = len(GARMENTS) - 1
 
 
 def current():

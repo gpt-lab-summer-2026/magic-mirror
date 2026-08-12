@@ -12,6 +12,8 @@ import config
 import debug_hud
 import display
 import garment_overlay
+import garment_overlay_bottom
+import garment_rig
 import garment_library
 import parser_thread
 
@@ -50,7 +52,7 @@ if use_parser:
 else:
     print("No GPU: parser off, so garments draw over hands and bare arms.", flush=True)
 
-smoother = garment_overlay.LandmarkSmoother(alpha=0.4)
+smoother = garment_rig.LandmarkSmoother(alpha=0.4)
 frame_ms = 1000 / config.CAPTURE_FPS   # smoothed; the raw per-frame number is unreadable jitter
 show_debug = False
 fullscreen = config.ON_RIG
@@ -100,9 +102,12 @@ with vision.PoseLandmarker.create_from_options(options) as landmarker:
         garment = garment_library.current()
         if has_pose and garment is not None:
             h, w = frame.shape[:2]
-            body_points = garment_overlay.get_body_points(result.pose_landmarks[0], w, h)
+            # GarmentBottom needs hip/knee/ankle tracking and its own leg segments 
+            overlay = (garment_overlay_bottom if isinstance(garment, garment_overlay_bottom.GarmentBottom)
+                       else garment_overlay)
+            body_points = overlay.get_body_points(result.pose_landmarks[0], w, h)
             if body_points is not None:
-                frame = garment_overlay.warp_and_blend(
+                frame = overlay.warp_and_blend(
                     frame, garment, smoother.update(body_points),
                     light_from=clean if relight else None)
                 t = debug_hud.mark("warp", t)

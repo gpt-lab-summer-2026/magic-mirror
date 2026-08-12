@@ -22,6 +22,11 @@ POINT_NAMES = [
     "right_wrist",
 ]
 
+# calibrate.py allows saving once this many points are placed, in order —
+# everything after this is optional to click, matching torso's own
+# required points (shoulders + hip-center)
+CORE_POINT_COUNT = 3
+
 # MediaPipe Pose landmark indices used below.
 LEFT_SHOULDER = garment_rig.LEFT_SHOULDER
 RIGHT_SHOULDER = garment_rig.RIGHT_SHOULDER

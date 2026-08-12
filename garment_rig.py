@@ -188,13 +188,6 @@ def load_calibration(image_path: str, point_names: list, segment_required_points
     with open(anchors_path) as f:
         raw_anchors = json.load(f)
 
-    missing = [name for name in point_names if name not in raw_anchors]
-    if missing:
-        raise ValueError(
-            f"Calibration file for {image_path} is missing {missing}. "
-            f"Re-run: python calibrate.py {image_path}"
-        )
-
     # calibrate.py does not write this key, so a newly calibrated garment has
     # to have one added by hand. Deliberate: defaulting it would let a hidden
     # body part silently show through the fabric.
@@ -219,7 +212,20 @@ def load_calibration(image_path: str, point_names: list, segment_required_points
             f'Valid names: {", ".join(segment_required_points)}'
         )
 
-    anchors = {name: np.float32(raw_anchors[name]) for name in point_names}
+    # Only the points actually needed by this garment's own declared
+    # segments have to exist — not every point_names entry. A sleeveless
+    # top or a skirt is expected to be missing the arm/leg points
+    # entirely, since calibrate.py lets you save without them.
+    needed_points = {n for seg in raw_anchors["segments"] for n in segment_required_points[seg]}
+    missing = [name for name in needed_points if name not in raw_anchors]
+    if missing:
+        raise ValueError(
+            f"Calibration file for {image_path} declares segments {raw_anchors['segments']} "
+            f"but is missing the points they need: {missing}. "
+            f"Re-run: python calibrate.py {image_path}"
+        )
+
+    anchors = {name: np.float32(raw_anchors[name]) for name in point_names if name in raw_anchors}
     return rgba, anchors, raw_anchors["occluders"], raw_anchors["segments"]
 
 

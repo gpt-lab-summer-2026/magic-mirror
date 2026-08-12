@@ -37,6 +37,11 @@ POINT_NAMES_BOTTOM = [
     "right_ankle",
 ]
 
+# calibrate.py allows saving once this many points are placed, in order —
+# everything after this is optional to click, matching everything the seat
+# panel itself needs (hip_center, left_waist, right_waist, crotch).
+CORE_POINT_COUNT = 4
+
 # MediaPipe Pose landmark indices used below.
 LEFT_HIP = garment_rig.LEFT_HIP
 RIGHT_HIP = garment_rig.RIGHT_HIP

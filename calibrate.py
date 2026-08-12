@@ -7,20 +7,28 @@ and the runtime overlay can never disagree about ordering:
   1. Left shoulder
   2. Right shoulder
   3. Hip center   (roughly where the hips would sit, centered horizontally)
-  4. Left elbow
-  5. Right elbow
-  6. Left wrist
-  7. Right wrist
+  4. Left elbow   \
+  5. Right elbow   } optional - skip for a sleeveless top/dress
+  6. Left wrist    } (press s once the first 3 are placed)
+  7. Right wrist  /
 
 Bottoms (--bottom) - garment_overlay_bottom.POINT_NAMES_BOTTOM:
   1. Hip center   (roughly where the waistband centers horizontally)
   2. Left waist   (top-left corner of the waistband)
   3. Right waist  (top-right corner of the waistband)
-  4. Crotch       (where the legs separate - bottom tip of the seat panel)
-  5. Left knee
-  6. Right knee
-  7. Left ankle
-  8. Right ankle
+  4. Crotch       (where the legs separate - or just a bottom-center
+                   reference point, e.g. for a skirt with no leg seam)
+  5. Left knee    \
+  6. Right knee     } optional - skip for a skirt
+  7. Left ankle     } (press s once the first 4 are placed)
+  8. Right ankle  /
+
+The points past each list's core prefix are exactly the ones a sleeveless
+top or a skirt doesn't need — pressing s early only saves the points you
+actually clicked. What actually enforces "every point a garment's declared
+segments need must exist" is garment_rig.load_calibration at runtime, not
+this file — so calibrate.py itself never needs to know which segments a
+garment ends up declaring.
 
 These become the correspondences the runtime rigid warp is fit against each
 frame — whichever of these points has a currently-visible match on the
@@ -40,7 +48,7 @@ Usage:
 Controls:
     click   - place the next point
     u       - undo last point
-    s       - save (once all points are placed)
+    s       - save (once the core points for this garment kind are placed)
     q       - quit without saving
 """
 import sys
@@ -50,8 +58,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from garment_overlay import POINT_NAMES
-from garment_overlay_bottom import POINT_NAMES_BOTTOM
+from garment_overlay import POINT_NAMES, CORE_POINT_COUNT as CORE_POINT_COUNT_TOP
+from garment_overlay_bottom import POINT_NAMES_BOTTOM, CORE_POINT_COUNT as CORE_POINT_COUNT_BOTTOM
 
 # Cycled by point index - long enough for the longer of the two point sets
 # (bottoms, at 8), and wraps via modulo in calibrate() if that ever grows.
@@ -84,7 +92,7 @@ def _composite_on_checkerboard(rgba, square=16):
     return rgba[:, :, :3]
 
 
-def calibrate(image_path: str, point_names: list) -> dict:
+def calibrate(image_path: str, point_names: list, core_count: int) -> dict:
     rgba = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
     if rgba is None:
         raise FileNotFoundError(f"Could not read image: {image_path}")
@@ -108,8 +116,13 @@ def calibrate(image_path: str, point_names: list) -> dict:
             cv2.putText(frame, point_names[i], (px + 8, py - 8),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-        next_label = point_names[len(points)] if len(points) < len(point_names) else "all points set - press s to save"
-        cv2.putText(frame, f"click: {next_label}", (10, 25),
+        can_save = len(points) >= core_count
+        if len(points) < len(point_names):
+            next_label = f"{point_names[len(points)]}" + ("" if len(points) < core_count else " (optional)")
+        else:
+            next_label = "all points set"
+        status = f"click: {next_label}" + ("  |  s = save now" if can_save else "")
+        cv2.putText(frame, status, (10, 25),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
         cv2.imshow(window_name, frame)
@@ -118,9 +131,10 @@ def calibrate(image_path: str, point_names: list) -> dict:
         if key == ord('u') and points:
             points.pop()
         elif key == ord('s'):
-            if len(points) == len(point_names):
+            if can_save:
                 break
-            print(f"Need all {len(point_names)} points before saving ({len(points)} placed so far).")
+            print(f"Need at least the first {core_count} (core) points before saving "
+                  f"({len(points)} placed so far).")
         elif key == ord('q'):
             cv2.destroyAllWindows()
             sys.exit("Calibration cancelled.")
@@ -157,7 +171,8 @@ if __name__ == "__main__":
 
     img_path = args[0]
     point_names = POINT_NAMES_BOTTOM if is_bottom else POINT_NAMES
-    anchors = calibrate(img_path, point_names)
+    core_count = CORE_POINT_COUNT_BOTTOM if is_bottom else CORE_POINT_COUNT_TOP
+    anchors = calibrate(img_path, point_names, core_count)
     out_path = save_anchors(img_path, anchors)
     print(f"Saved anchors to: {out_path}")
     print(anchors)

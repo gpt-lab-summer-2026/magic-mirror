@@ -121,23 +121,35 @@ SEGMENT_TRANSFORM_KIND = {
 }
 
 
-# The crotch joint (leg meeting the triangular seat) needs a much bigger
-# radius than the knee joint does, on a baggy garment - the 75th
-# percentile "typical" half-width used everywhere else gets dragged down
-# by the narrower knee-ward portion of the leg, badly underestimating how
-# wide the fabric actually is right near the crotch. This percentile is
-# used ONLY for that one joint; the knee joint keeps using the standard
-# half_width (75th percentile, computed once below) exactly as before.
+# The crotch joint (leg meeting the triangular seat) needs to be WIDE
+# (perpendicular to the leg's own bone line) to cover a baggy thigh's full
+# width without pinching - that's what CROTCH_JOINT_PERCENTILE (measuring
+# a wider percentile than the standard half_width) is for. But a plain
+# circle sized that wide is equally tall in every direction, including
+# straight up the bone toward the waist - which reaches unnaturally far
+# into the seat's own territory. An ellipse decouples the two: wide
+# sideways (CROTCH_JOINT_PERCENTILE), limited along the bone (the
+# standard half_width, same value already used for the knee joint).
 CROTCH_JOINT_PERCENTILE = 95
+
+
+def _elliptical_joint_mask(pts, joint_point, bone_unit, radius_along, radius_perp):
+    """1.0 exactly on the ellipse boundary; <1.0 inside."""
+    perp_unit = np.array([-bone_unit[1], bone_unit[0]])
+    offset = pts - joint_point
+    along = offset @ bone_unit
+    perp = offset @ perp_unit
+    return (along / max(radius_along, 1e-6)) ** 2 + (perp / max(radius_perp, 1e-6)) ** 2
 
 
 def _build_bottom_segments(rgba, anchors, segment_names, segment_required_points, segment_joints):
     """
     Bottoms-only variant of garment_rig.build_segments: identical Voronoi
-    partition and joint-overlap-disk mechanics in every respect except one -
-    the crotch joint's overlap radius. See CROTCH_JOINT_PERCENTILE.
-    Deliberately not in garment_rig.py, so tops/torso/arms are completely
-    unaffected.
+    partition and joint-overlap-disk mechanics, except the crotch joint
+    (leg meeting the triangular seat) uses an ellipse instead of a circle -
+    see CROTCH_JOINT_PERCENTILE / _elliptical_joint_mask. The knee joint is
+    untouched: still a plain circle, same formula as always. Deliberately
+    not in garment_rig.py, so tops/torso/arms are completely unaffected.
     """
     h, w = rgba.shape[:2]
     alpha = rgba[:, :, 3]
@@ -172,14 +184,19 @@ def _build_bottom_segments(rgba, anchors, segment_names, segment_required_points
         if seg_a not in seg_masks or seg_b not in seg_masks:
             continue
         joint_point = anchors[joint_name]
-        if seg_a in TRIANGLE_SEGMENTS:
-            radius = JOINT_OVERLAP_MULTIPLIER * half_width_at_triangle_joint[seg_b]
-        elif seg_b in TRIANGLE_SEGMENTS:
-            radius = JOINT_OVERLAP_MULTIPLIER * half_width_at_triangle_joint[seg_a]
+        if seg_a in TRIANGLE_SEGMENTS or seg_b in TRIANGLE_SEGMENTS:
+            leg_name = seg_b if seg_a in TRIANGLE_SEGMENTS else seg_a
+            leg_start, leg_end = [anchors[n] for n in segment_required_points[leg_name]]
+            bone = leg_end - leg_start
+            bone_unit = bone / np.linalg.norm(bone)
+            radius_along = JOINT_OVERLAP_MULTIPLIER * half_width[leg_name]
+            radius_perp = JOINT_OVERLAP_MULTIPLIER * half_width_at_triangle_joint[leg_name]
+            ell = _elliptical_joint_mask(pts, joint_point, bone_unit, radius_along, radius_perp)
+            near_joint = (ell <= 1.0) & opaque
         else:
             radius = JOINT_OVERLAP_MULTIPLIER * min(half_width[seg_a], half_width[seg_b])
-        dist_to_joint = np.linalg.norm(pts - joint_point, axis=1)
-        near_joint = (dist_to_joint <= radius) & opaque
+            dist_to_joint = np.linalg.norm(pts - joint_point, axis=1)
+            near_joint = (dist_to_joint <= radius) & opaque
         seg_masks[seg_a] = seg_masks[seg_a] | near_joint
         seg_masks[seg_b] = seg_masks[seg_b] | near_joint
 

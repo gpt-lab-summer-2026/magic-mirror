@@ -1,0 +1,41 @@
+{
+  "hip_center": [
+    495,
+    394
+  ],
+  "left_waist": [
+    749,
+    159
+  ],
+  "right_waist": [
+    263,
+    144
+  ],
+  "crotch": [
+    507,
+    531
+  ],
+  "left_knee": [
+    686,
+    971
+  ],
+  "right_knee": [
+    298,
+    981
+  ],
+  "left_ankle": [
+    658,
+    1472
+  ],
+  "right_ankle": [
+    277,
+    1473
+  ],
+  "segments": [
+    "seat"
+  ],
+  "occluders": [
+    "hands",
+    "shoes"
+  ]
+}

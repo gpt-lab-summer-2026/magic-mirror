@@ -29,9 +29,6 @@ def remove_background_from_image(input_path, output_path):
 
     return output_path
 
-
-# remove_background_from_folder('test-images', 'test-images-output')
-
 if __name__ == "__main__":
     if len(sys.argv) != 3:
         sys.exit("Usage: python bg_remove.py path/to/input.png garments/name.png")

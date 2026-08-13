@@ -7,8 +7,9 @@ is imported from garment_rig.py.
 
 The waist-to-crotch area is one triangular "seat" segment - like the tops
 file's torso, it needs an affine fit so waist width and waist-to-crotch
-depth can scale independently. The legs only become separate rigid pieces
-below the crotch, which is where fabric actually splits on a real garment.
+depth can scale independently. Each upper leg is also a triangle (waist,
+crotch, knee) rather than a single bone line, so it can follow the seat's
+own waist corner instead of pivoting only from the crotch.
 
 MediaPipe tracks hip joints, not a waist or a crotch, so get_body_points()
 synthesizes both every frame - see WAIST_RISE_RATIO, SEAT_WIDTH_MULTIPLIER,
@@ -65,7 +66,7 @@ MIN_VISIBILITY = garment_rig.MIN_VISIBILITY
 # which is what makes an unraised fit look like it's sliding down the hips.
 # Raises left_waist/right_waist upward from the hip line before anything
 # else is measured from them.
-WAIST_RISE_RATIO = 0.5
+WAIST_RISE_RATIO = 0.65
 
 # MediaPipe's hip landmarks are also visibly narrower than where a real
 # pair of pants drapes - widen the two waist points the seat panel is fit
@@ -74,7 +75,7 @@ WAIST_RISE_RATIO = 0.5
 SEAT_WIDTH_MULTIPLIER = 1.6
 
 # Crotch depth below the (already-raised) waist line.
-CROTCH_DROP_RATIO = 0.9
+CROTCH_DROP_RATIO = 1.2
 
 # name -> landmark index, for the points that are optional at runtime (a
 # leg can swing out of frame without blocking the overlay entirely).
@@ -90,20 +91,24 @@ OPTIONAL_LANDMARKS = {
 # joint looks clean rather than showing the upper-leg segment's edge).
 SEGMENT_REQUIRED_POINTS = {
     "seat":             ["left_waist", "right_waist", "crotch"],
-    "left_upper_leg":   ["crotch", "left_knee"],
+    "left_upper_leg":   ["left_waist", "crotch", "left_knee"],
     "left_lower_leg":   ["left_knee", "left_ankle"],
-    "right_upper_leg":  ["crotch", "right_knee"],
+    "right_upper_leg":  ["right_waist", "crotch", "right_knee"],
     "right_lower_leg":  ["right_knee", "right_ankle"],
 }
 SEGMENT_DRAW_ORDER = ["left_upper_leg", "right_upper_leg", "seat", "left_lower_leg", "right_lower_leg"]
 
-# The seat is the one segment shaped like a triangle rather than a bone
-# line — see garment_rig.build_segments/_distance_to_segment_shape.
-TRIANGLE_SEGMENTS = frozenset({"seat"})
+# Segments shaped like a triangle rather than a bone line — see
+# garment_rig.build_segments/_distance_to_segment_shape. The upper legs are
+# triangles (waist, crotch, knee) rather than a single crotch-to-knee bone
+# line, matching their 3-point SEGMENT_REQUIRED_POINTS above.
+TRIANGLE_SEGMENTS = frozenset({"seat", "left_upper_leg", "right_upper_leg"})
 
 # (segment_a, segment_b, shared joint anchor name) for every place two
 # segments meet. Both segments get a circular overlap zone added around
-# that joint point, on top of their normal nearest-line assignment.
+# that joint point, on top of their normal nearest-line assignment - except
+# at the seat/leg boundary, which instead gets a band overlap along the
+# whole waist-to-crotch edge (see _build_bottom_segments).
 SEGMENT_JOINTS = [
     ("seat", "left_upper_leg", "crotch"),
     ("seat", "right_upper_leg", "crotch"),
@@ -121,35 +126,11 @@ SEGMENT_TRANSFORM_KIND = {
 }
 
 
-# The crotch joint (leg meeting the triangular seat) needs to be WIDE
-# (perpendicular to the leg's own bone line) to cover a baggy thigh's full
-# width without pinching - that's what CROTCH_JOINT_PERCENTILE (measuring
-# a wider percentile than the standard half_width) is for. But a plain
-# circle sized that wide is equally tall in every direction, including
-# straight up the bone toward the waist - which reaches unnaturally far
-# into the seat's own territory. An ellipse decouples the two: wide
-# sideways (CROTCH_JOINT_PERCENTILE), limited along the bone (the
-# standard half_width, same value already used for the knee joint).
-CROTCH_JOINT_PERCENTILE = 95
-
-
-def _elliptical_joint_mask(pts, joint_point, bone_unit, radius_along, radius_perp):
-    """1.0 exactly on the ellipse boundary; <1.0 inside."""
-    perp_unit = np.array([-bone_unit[1], bone_unit[0]])
-    offset = pts - joint_point
-    along = offset @ bone_unit
-    perp = offset @ perp_unit
-    return (along / max(radius_along, 1e-6)) ** 2 + (perp / max(radius_perp, 1e-6)) ** 2
-
-
 def _build_bottom_segments(rgba, anchors, segment_names, segment_required_points, segment_joints):
     """
     Bottoms-only variant of garment_rig.build_segments: identical Voronoi
-    partition and joint-overlap-disk mechanics, except the crotch joint
-    (leg meeting the triangular seat) uses an ellipse instead of a circle -
-    see CROTCH_JOINT_PERCENTILE / _elliptical_joint_mask. The knee joint is
-    untouched: still a plain circle, same formula as always. Deliberately
-    not in garment_rig.py, so tops/torso/arms are completely unaffected.
+    partition and joint-overlap-disk mechanics. Deliberately not in
+    garment_rig.py, so tops/torso/arms are completely unaffected.
     """
     h, w = rgba.shape[:2]
     alpha = rgba[:, :, 3]
@@ -170,35 +151,38 @@ def _build_bottom_segments(rgba, anchors, segment_names, segment_required_points
 
     seg_masks = {}
     half_width = {}
-    half_width_at_triangle_joint = {}
     for i, name in enumerate(segment_names):
         mask = (labels == i) & opaque
         seg_masks[name] = mask
         own_dist = distances[mask, i]
         half_width[name] = float(np.percentile(own_dist, 75)) if own_dist.size else 0.0
-        half_width_at_triangle_joint[name] = (
-            float(np.percentile(own_dist, CROTCH_JOINT_PERCENTILE)) if own_dist.size else 0.0
-        )
 
     for seg_a, seg_b, joint_name in segment_joints:
         if seg_a not in seg_masks or seg_b not in seg_masks:
             continue
+        if "seat" in (seg_a, seg_b):
+            # The seat/leg boundary gets a band overlap along the whole
+            # waist-to-crotch edge below, not a circular disk at a point.
+            continue
         joint_point = anchors[joint_name]
-        if seg_a in TRIANGLE_SEGMENTS or seg_b in TRIANGLE_SEGMENTS:
-            leg_name = seg_b if seg_a in TRIANGLE_SEGMENTS else seg_a
-            leg_start, leg_end = [anchors[n] for n in segment_required_points[leg_name]]
-            bone = leg_end - leg_start
-            bone_unit = bone / np.linalg.norm(bone)
-            radius_along = JOINT_OVERLAP_MULTIPLIER * half_width[leg_name]
-            radius_perp = JOINT_OVERLAP_MULTIPLIER * half_width_at_triangle_joint[leg_name]
-            ell = _elliptical_joint_mask(pts, joint_point, bone_unit, radius_along, radius_perp)
-            near_joint = (ell <= 1.0) & opaque
-        else:
-            radius = JOINT_OVERLAP_MULTIPLIER * min(half_width[seg_a], half_width[seg_b])
-            dist_to_joint = np.linalg.norm(pts - joint_point, axis=1)
-            near_joint = (dist_to_joint <= radius) & opaque
+        radius = JOINT_OVERLAP_MULTIPLIER * min(half_width[seg_a], half_width[seg_b])
+        dist_to_joint = np.linalg.norm(pts - joint_point, axis=1)
+        near_joint = (dist_to_joint <= radius) & opaque
         seg_masks[seg_a] = seg_masks[seg_a] | near_joint
         seg_masks[seg_b] = seg_masks[seg_b] | near_joint
+
+    # The seat panel draws over the top of each upper leg (SEGMENT_DRAW_ORDER
+    # puts "seat" after both upper legs), so extend its mask with a band of
+    # pixels along their whole shared waist-to-crotch edge - not just a
+    # single joint point - to actually cover the seam when composited.
+    if "seat" in seg_masks:
+        for leg_name, waist_name in (("left_upper_leg", "left_waist"), ("right_upper_leg", "right_waist")):
+            if leg_name not in seg_masks:
+                continue
+            band_width = JOINT_OVERLAP_MULTIPLIER * half_width[leg_name]
+            dist_to_edge = _point_to_segment_distance(pts, anchors[waist_name], anchors["crotch"])
+            near_edge = (dist_to_edge <= band_width) & opaque
+            seg_masks["seat"] = seg_masks["seat"] | near_edge
 
     segments = {}
     for name in segment_names:

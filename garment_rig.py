@@ -35,7 +35,7 @@ MIN_VISIBILITY = 0.5
 # half-width. >1.0 means the rounded cap is a bit larger than the limb's
 # own thickness, like a paper-doll rivet, which comfortably covers
 # the joint at any bend angle.
-JOINT_OVERLAP_MULTIPLIER = 1.15
+JOINT_OVERLAP_MULTIPLIER = 1.30
 
 _last_debug_message = None
 

@@ -54,7 +54,7 @@ MIN_VISIBILITY = garment_rig.MIN_VISIBILITY
 # every frame. Kept as separate constants (not imported from bottoms)
 # since a skirt's real waistband/drape can sit differently than pants'
 # and these may need their own tuning by eye.
-WAIST_RISE_RATIO = 0.65
+WAIST_RISE_RATIO = 0.9
 SEAT_WIDTH_MULTIPLIER = 1.6
 CROTCH_DROP_RATIO = 1.2
 

@@ -165,7 +165,7 @@ def _build_bottom_segments(rgba, anchors, segment_names, segment_required_points
             # waist-to-crotch edge below, not a circular disk at a point.
             continue
         joint_point = anchors[joint_name]
-        radius = JOINT_OVERLAP_MULTIPLIER * min(half_width[seg_a], half_width[seg_b])
+        radius = (JOINT_OVERLAP_MULTIPLIER + 0.7) * min(half_width[seg_a], half_width[seg_b]) # +0.7 for better knee coverage
         dist_to_joint = np.linalg.norm(pts - joint_point, axis=1)
         near_joint = (dist_to_joint <= radius) & opaque
         seg_masks[seg_a] = seg_masks[seg_a] | near_joint

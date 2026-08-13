@@ -20,6 +20,7 @@ dist/
 # Model files
 *.task
 *.tflite
+*.pt
 
 # IDE
 .vscode/
@@ -37,3 +38,4 @@ CLAUDE.md
 test-images-output/
 webcam-captures/
 bot-garments/
+dataset/

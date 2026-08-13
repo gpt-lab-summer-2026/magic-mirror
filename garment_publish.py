@@ -7,6 +7,7 @@ no Telegram and the whole pipeline runs from a command line.
 Usage:
     python garment_publish.py photo.jpg shirt
 """
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -14,13 +15,43 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+import anchor_check
+import anchor_predict
 import auto_anchors
 import bg_remove
 import composite
 import config
 import garment_library
 import normalize
+from garment_dataset import DATASET_DIR
 from garment_types import RIG_BY_CATEGORY
+
+# The trained model first, the silhouette second. Both have to pass the same
+# check, so a checkpoint that has learned nothing cannot quietly take over.
+ANCHOR_SOURCES = (anchor_predict.top_anchors, auto_anchors.top_anchors)
+
+
+def anchors_for(rgba):
+    """The first sidecar that passes the check. Returns (sidecar, complaint) with
+    exactly one of them set, so a garment is never published unmeasured."""
+    complaint = "couldn't find the shoulders - try a flatter photo against a plain background"
+    for source in ANCHOR_SOURCES:
+        sidecar = source(rgba)
+        if sidecar is None:
+            continue
+        found = anchor_check.problems(sidecar, rgba)
+        if not found:
+            return sidecar, None
+        complaint = f"that photo came out wrong: {found[0]}"
+    return None, complaint
+
+
+def keep_for_training(cut: bytes):
+    """Every published cutout, kept to be labelled later. Named by its own
+    contents, so the same photo sent twice is one training example, not two."""
+    directory = Path(DATASET_DIR)
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{hashlib.md5(cut).hexdigest()[:12]}.png").write_bytes(cut)
 
 
 def publish(png: bytes, category: str, labels=None) -> str:
@@ -33,9 +64,10 @@ def publish(png: bytes, category: str, labels=None) -> str:
         return f"{category} needs the bottom rig, and nothing finds bottom anchors yet"
 
     cut = bg_remove.cutout(png)
-    sidecar = auto_anchors.top_anchors(cv2.imdecode(np.frombuffer(cut, np.uint8), cv2.IMREAD_UNCHANGED))
+    sidecar, complaint = anchors_for(cv2.imdecode(np.frombuffer(cut, np.uint8), cv2.IMREAD_UNCHANGED))
     if sidecar is None:
-        return "couldn't find the shoulders - try a flatter photo against a plain background"
+        return complaint
+    keep_for_training(cut)
 
     # Garment reads an image path and derives its sidecar path from it, so both
     # have to exist on disk, adjacent, sharing a stem. The category is the name,

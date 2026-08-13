@@ -39,12 +39,10 @@ POINT_NAMES_BOTTOM = [
     "right_ankle",
 ]
 
-# calibrate.py allows saving once this many points are placed, in order —
-# everything after this is optional to click, matching everything the seat
-# panel itself needs (hip_center, left_waist, right_waist, crotch). The leg
-# points beyond that are exactly as optional to calibrate as they already
-# are to track live: a skirt's "segments" list just won't include the leg
-# segments, so nothing downstream ever needs their anchors.
+# calibrate.py allows saving once this many points (hip_center, left_waist,
+# right_waist, crotch) are placed, in order: everything after this is optional
+# to click. The leg points beyond that are optional to calibrate as they 
+# are to track live: a skirt's "segments" list won't include the leg segments.
 CORE_POINT_COUNT = 4
 
 # MediaPipe Pose landmark indices used below.

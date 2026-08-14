@@ -54,7 +54,7 @@ MIN_VISIBILITY = garment_rig.MIN_VISIBILITY
 # every frame. Kept as separate constants (not imported from bottoms)
 # since a skirt's real waistband/drape can sit differently than pants'
 # and these may need their own tuning by eye.
-WAIST_RISE_RATIO = 0.9
+WAIST_RISE_RATIO = 0.8
 SEAT_WIDTH_MULTIPLIER = 1.6
 CROTCH_DROP_RATIO = 1.2
 
@@ -72,13 +72,13 @@ OPTIONAL_LANDMARKS = {
 # slack - a single noisy point will visibly warp the whole skirt to match
 # it). Raise this if jitter turns out to be a problem once this is running
 # on a live feed.
-TPS_REGULARIZATION = 0.0
+TPS_REGULARIZATION = 0.3
 
 # How far past the tracked point cloud's bounding box to still compute and
 # draw the warp, as a multiple of waist width. Keeps the per-pixel TPS
 # evaluation limited to a sensible region instead of the full frame, and
 # avoids TPS's tendency to extrapolate wildly far from the data it was fit on.
-PADDING_RATIO = 0.6
+PADDING_RATIO = 0.8
 
 
 class GarmentSkirt:

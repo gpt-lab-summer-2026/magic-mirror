@@ -13,6 +13,7 @@ import debug_hud
 import display
 import garment_overlay
 import garment_overlay_bottom
+import garment_overlay_skirt
 import garment_rig
 import garment_library
 import parser_thread
@@ -102,9 +103,17 @@ with vision.PoseLandmarker.create_from_options(options) as landmarker:
         garment = garment_library.current()
         if has_pose and garment is not None:
             h, w = frame.shape[:2]
-            # GarmentBottom needs hip/knee/ankle tracking and its own leg segments 
-            overlay = (garment_overlay_bottom if isinstance(garment, garment_overlay_bottom.GarmentBottom)
-                       else garment_overlay)
+            # Each garment kind tracks/warps differently: GarmentBottom needs
+            # hip/knee/ankle tracking and its own rigid leg segments,
+            # GarmentSkirt needs the same hip/knee/ankle tracking but warps
+            # the whole image as one TPS sheet with no segments at all, and
+            # everything else (tops/dresses) only needs shoulder/hip tracking.
+            if isinstance(garment, garment_overlay_bottom.GarmentBottom):
+                overlay = garment_overlay_bottom
+            elif isinstance(garment, garment_overlay_skirt.GarmentSkirt):
+                overlay = garment_overlay_skirt
+            else:
+                overlay = garment_overlay
             body_points = overlay.get_body_points(result.pose_landmarks[0], w, h)
             if body_points is not None:
                 frame = overlay.warp_and_blend(

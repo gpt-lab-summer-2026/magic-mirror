@@ -68,8 +68,7 @@ WAIST_RISE_RATIO = 0.65
 
 # MediaPipe's hip landmarks are also visibly narrower than where a real
 # pair of pants drapes - widen the two waist points the seat panel is fit
-# against, outward from their own midpoint, so the waist doesn't render
-# too narrow.
+# against, so the waist doesn't render too narrow.
 SEAT_WIDTH_MULTIPLIER = 1.6
 
 # Crotch depth below the (already-raised) waist line.
@@ -98,8 +97,7 @@ SEGMENT_DRAW_ORDER = ["left_upper_leg", "right_upper_leg", "seat", "left_lower_l
 
 # Segments shaped like a triangle rather than a bone line — see
 # garment_rig.build_segments/_distance_to_segment_shape. The upper legs are
-# triangles (waist, crotch, knee) rather than a single crotch-to-knee bone
-# line, matching their 3-point SEGMENT_REQUIRED_POINTS above.
+# triangles (waist, crotch, knee).
 TRIANGLE_SEGMENTS = frozenset({"seat", "left_upper_leg", "right_upper_leg"})
 
 # (segment_a, segment_b, shared joint anchor name) for every place two
@@ -159,8 +157,7 @@ def _build_bottom_segments(rgba, anchors, segment_names, segment_required_points
         if seg_a not in seg_masks or seg_b not in seg_masks:
             continue
         if "seat" in (seg_a, seg_b):
-            # The seat/leg boundary gets a band overlap along the whole
-            # waist-to-crotch edge below, not a circular disk at a point.
+            # The seat/leg boundary doesn't use a circular disk.
             continue
         joint_point = anchors[joint_name]
         radius = (JOINT_OVERLAP_MULTIPLIER + 0.7) * min(half_width[seg_a], half_width[seg_b]) # +0.7 for better knee coverage
@@ -169,10 +166,9 @@ def _build_bottom_segments(rgba, anchors, segment_names, segment_required_points
         seg_masks[seg_a] = seg_masks[seg_a] | near_joint
         seg_masks[seg_b] = seg_masks[seg_b] | near_joint
 
-    # The seat panel draws over the top of each upper leg (SEGMENT_DRAW_ORDER
-    # puts "seat" after both upper legs), so extend its mask with a band of
-    # pixels along their whole shared waist-to-crotch edge - not just a
-    # single joint point - to actually cover the seam when composited.
+    # The seat panel draws over the top of each upper leg (SEGMENT_DRAW_ORDER),
+    # so extend its mask with a band of pixels along their whole shared 
+    # waist-to-crotch edge to actually cover the seam when composited.
     if "seat" in seg_masks:
         for leg_name, waist_name in (("left_upper_leg", "left_waist"), ("right_upper_leg", "right_waist")):
             if leg_name not in seg_masks:

@@ -35,3 +35,7 @@ POSE_MODEL = "pose_landmarker_full.task"
 # garment. At 3 that measured ~120 ms and crossed arms tore visibly.
 PARSER_EVERY_N = 1
 GARMENT_DIR = "garments"   # scanned by garment_library.py in C2; nothing reads it yet
+
+# Uploads land here, never beside the hand-calibrated demos: a bad one is then
+# one folder to wipe, and it can never evict a garment that was clicked by hand.
+BOT_GARMENT_DIR = "bot-garments"

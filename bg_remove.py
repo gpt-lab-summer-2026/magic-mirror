@@ -2,30 +2,33 @@ import sys
 from pathlib import Path
 from rembg import remove, new_session
 
+_session = None
+
+
+def cutout(data: bytes) -> bytes:
+    """Image bytes in, background-removed RGBA PNG bytes out."""
+    global _session
+    # Lazy: new_session() downloads ~170 MB of u2net on a fresh machine, so
+    # building one at import time would hang even a --help.
+    if _session is None:
+        _session = new_session()
+    return remove(data, session=_session)
+
+
 def remove_background_from_folder(folder_path, output_folder):
-    session = new_session()
     output_dir = Path(output_folder)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     for file in Path(folder_path).glob('*.png'):
-        input_path = str(file)
-        output_path = str(output_dir / (file.stem + ".out.png"))
-
-        with open(input_path, 'rb') as i:
-            with open(output_path, 'wb') as o:
-                input = i.read()
-                output = remove(input, session=session)
-                o.write(output)
+        remove_background_from_image(str(file), str(output_dir / (file.stem + ".out.png")))
 
 def remove_background_from_image(input_path, output_path):
-    session = new_session()
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
     with open(input_path, 'rb') as i:
-        with open(output_path, 'wb') as o:
-            input = i.read()
-            output = remove(input, session=session)
-            o.write(output)
+        data = i.read()
+    with open(output_path, 'wb') as o:
+        o.write(cutout(data))
 
     return output_path
 

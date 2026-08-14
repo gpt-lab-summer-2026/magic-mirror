@@ -1,3 +1,4 @@
+import sys
 import threading
 import time
 
@@ -17,6 +18,7 @@ import garment_overlay_skirt
 import garment_rig
 import garment_library
 import parser_thread
+import telegram_bot
 
 # waitKeyEx codes for the arrows, Linux/Qt then Windows. They have no 8-bit
 # form, which is why the loop reads waitKeyEx and never masks with 0xFF -
@@ -48,10 +50,17 @@ print(f"Loaded {len(garment_library.GARMENTS)} garments: "
 use_parser = parser_thread.available()
 if use_parser:
     labels = parser_thread.start()
-    for g in garment_library.GARMENTS:
-        g.occluder_lut = composite.resolve_occluders(g, labels)
+    try:
+        for g in garment_library.GARMENTS:
+            g.occluder_lut = composite.resolve_occluders(g, labels)
+    except ValueError as e:
+        sys.exit(e)   # a hand-calibrated typo is still worth refusing to start over
 else:
+    labels = None   # the bot still publishes; it just resolves no occluder LUT
     print("No GPU: parser off, so garments draw over hands and bare arms.", flush=True)
+
+if telegram_bot.available():
+    telegram_bot.start(labels)
 
 smoother = garment_rig.LandmarkSmoother(alpha=0.4)
 frame_ms = 1000 / config.CAPTURE_FPS   # smoothed; the raw per-frame number is unreadable jitter

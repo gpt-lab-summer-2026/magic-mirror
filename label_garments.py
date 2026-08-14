@@ -8,7 +8,8 @@ the same sidecar the mirror loads, so a labelled photo is immediately wearable
 and immediately scorable.
 
 Usage:
-    python label_garments.py [folder]     # defaults to dataset/
+    python label_garments.py                       # everything in dataset/
+    python label_garments.py dataset/one.png       # just that one, to go back to it
 
 Controls:
     drag - move the nearest anchor
@@ -31,6 +32,7 @@ from garment_overlay import POINT_NAMES, SEGMENT_REQUIRED_POINTS
 DATASET_DIR = "dataset"
 VIEW_HEIGHT = 900   # photos arrive around 1500px tall and the window has to fit a screen
 GRAB_RADIUS = 20    # in view pixels - how near the cursor must be to pick an anchor up
+MARGIN = 160        # blank room kept around the photo, plus whatever an anchor needs
 
 
 def prefill(png, rgba):
@@ -51,23 +53,49 @@ def bones(segments):
                 yield start, end
 
 
-def nearest_anchor(anchors, x, y, scale):
+def view(rgba, anchors):
+    """The photo with room around it for anchors that fall outside it, plus where
+    the photo starts and what it is scaled by.
+
+    A short sleeve's wrist sits well off the garment, and an anchor you cannot
+    see is an anchor you cannot correct - which is how one gets left wrong.
+    """
+    height, width = rgba.shape[:2]
+    xs = [anchors[name][0] for name in POINT_NAMES]
+    ys = [anchors[name][1] for name in POINT_NAMES]
+    origin = (max(0, -min(xs)) + MARGIN, max(0, -min(ys)) + MARGIN)
+    canvas = np.full((height + origin[1] + max(0, max(ys) - height) + MARGIN,
+                      width + origin[0] + max(0, max(xs) - width) + MARGIN, 3), 40, np.uint8)
+    canvas[origin[1]:origin[1] + height, origin[0]:origin[0] + width] = \
+        _composite_on_checkerboard(rgba)
+    # Where the photo ends, so an anchor beyond it is obviously beyond it.
+    cv2.rectangle(canvas, origin, (origin[0] + width, origin[1] + height), (110, 110, 110), 1)
+
+    scale = min(1.0, VIEW_HEIGHT / canvas.shape[0])
+    return cv2.resize(canvas, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA), origin, scale
+
+
+def to_view(point, origin, scale):
+    return int((point[0] + origin[0]) * scale), int((point[1] + origin[1]) * scale)
+
+
+def nearest_anchor(anchors, x, y, origin, scale):
     """The anchor under the cursor, or None when the cursor is near none of them."""
     # Nearest rather than first within reach: on a sleeveless garment the two
     # elbows can sit close enough together that first-match grabs the wrong one.
-    reach = {name: np.hypot(anchors[name][0] * scale - x, anchors[name][1] * scale - y)
+    reach = {name: np.hypot(*(np.subtract(to_view(anchors[name], origin, scale), (x, y))))
              for name in POINT_NAMES}
     closest = min(reach, key=reach.get)
     return closest if reach[closest] <= GRAB_RADIUS else None
 
 
-def draw(base, anchors, scale, held):
+def draw(base, anchors, origin, scale, held):
     canvas = base.copy()
     for start, end in bones(anchors["segments"]):
-        cv2.line(canvas, tuple(int(anchors[start][i] * scale) for i in (0, 1)),
-                 tuple(int(anchors[end][i] * scale) for i in (0, 1)), (255, 255, 255), 1)
+        cv2.line(canvas, to_view(anchors[start], origin, scale),
+                 to_view(anchors[end], origin, scale), (255, 255, 255), 1)
     for name, color in zip(POINT_NAMES, POINT_COLORS):
-        x, y = int(anchors[name][0] * scale), int(anchors[name][1] * scale)
+        x, y = to_view(anchors[name], origin, scale)
         cv2.circle(canvas, (x, y), 9 if name == held else 6, color, -1)
         cv2.putText(canvas, name, (x + 12, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
     return canvas
@@ -86,23 +114,23 @@ def label(png, window):
         return "skip", None
 
     anchors = json.loads(json.dumps(guess))   # a copy, so `r` still has the original
-    scale = min(1.0, VIEW_HEIGHT / rgba.shape[0])
-    base = cv2.resize(_composite_on_checkerboard(rgba), None, fx=scale, fy=scale,
-                      interpolation=cv2.INTER_AREA)
+    # Sized once, off the first guess: recomputing as you drag would make the
+    # picture jump under the cursor. MARGIN is the slack for dragging further out.
+    base, origin, scale = view(rgba, anchors)
     held = None
 
     def on_mouse(event, x, y, flags, userdata):
         nonlocal held, anchors
         if event == cv2.EVENT_LBUTTONDOWN:
-            held = nearest_anchor(anchors, x, y, scale)
+            held = nearest_anchor(anchors, x, y, origin, scale)
         elif event == cv2.EVENT_LBUTTONUP:
             held = None
         elif event == cv2.EVENT_MOUSEMOVE and held is not None:
-            anchors[held] = [int(x / scale), int(y / scale)]
+            anchors[held] = [int(x / scale) - origin[0], int(y / scale) - origin[1]]
 
     cv2.setMouseCallback(window, on_mouse)
     while True:
-        cv2.imshow(window, draw(base, anchors, scale, held))
+        cv2.imshow(window, draw(base, anchors, origin, scale, held))
         key = cv2.waitKey(20) & 0xFF
         if key == ord('n'):
             return "save", anchors
@@ -114,10 +142,12 @@ def label(png, window):
             anchors = json.loads(json.dumps(guess))
 
 
-def main(directory):
-    photos = sorted(Path(directory).glob("*.png"))
+def main(target):
+    # A folder to work through, or one photo to go straight back to.
+    path = Path(target)
+    photos = [path] if path.is_file() else sorted(path.glob("*.png"))
     if not photos:
-        sys.exit(f"No .png cutouts in {directory}/ - put background-removed garments there first.")
+        sys.exit(f"No .png cutouts in {target} - put background-removed garments there first.")
 
     window = "label garments - drag to correct, n=next k=skip r=reset q=quit"
     cv2.namedWindow(window)
@@ -133,7 +163,7 @@ def main(directory):
             saved += 1
 
     cv2.destroyAllWindows()
-    print(f"{saved} of {len(photos)} labelled in {directory}/")
+    print(f"{saved} of {len(photos)} labelled")
 
 
 if __name__ == "__main__":

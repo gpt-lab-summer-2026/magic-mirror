@@ -29,7 +29,7 @@ from garment_types import RIG_BY_CATEGORY
 
 # Everything garment_library needs to build a garment. A sidecar missing any of
 # it is half-written, and must not reach the mirror.
-SIDECAR_KEYS = POINT_NAMES + ["rig", "segments", "occluders"]
+SIDECAR_KEYS = POINT_NAMES + ["segments", "occluders"]
 
 # The trained model first, the silhouette second. Both have to pass the same
 # check, so a checkpoint that has learned nothing cannot quietly take over.

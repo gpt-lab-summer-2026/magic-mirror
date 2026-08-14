@@ -260,7 +260,6 @@ def top_anchors(rgba):
 
     sidecar = {name: [int((x - 1) / scale), int((y - 1) / scale)]
                for name, (x, y) in points.items()}
-    sidecar["rig"] = "top"
     sidecar["segments"] = segments
     # One sleeve still counts as sleeved: repainting both arms would erase the sleeve there is.
     sidecar["occluders"] = BASE_OCCLUDERS if measured else BASE_OCCLUDERS + ["arms"]

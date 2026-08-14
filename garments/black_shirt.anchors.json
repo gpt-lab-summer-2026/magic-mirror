@@ -27,7 +27,6 @@
     886,
     1144
   ],
-  "rig": "top",
   "segments": ["torso", "left_upper_arm", "right_upper_arm", "left_forearm", "right_forearm"],
   "occluders": ["hands", "face", "hair"]
 }

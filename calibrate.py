@@ -39,6 +39,8 @@ Saves a sidecar JSON next to the image: <name>.anchors.json
 
 Usage:
     python calibrate.py garments/white_top.png
+
+    for bottoms (pants, shorts, skirts):
     python calibrate.py garments/green_pants.png --bottom
 
     add segments and occluders by hand to the JSON if they're not there,

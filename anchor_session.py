@@ -5,8 +5,8 @@ auto_anchors reads a top off its own silhouette; nothing reads a pair of
 trousers, and a shirt it cannot measure still has to reach the phone somehow.
 So every upload gets a draft sidecar - measured where that works, spread over
 the garment's bounding box where it does not - and whoever sent the photo drags
-it into place on the anchor page. The sessions live here rather than in
-telegram_bot.py because anchor_server.py has to reach the same ones.
+it into place on the anchor page. The session lives here rather than in
+anchor_server.py, next to the draft that fills it.
 """
 import json
 import sys
@@ -132,29 +132,26 @@ def _sidecar(points, point_names, segments, occluders):
 
 
 def initial_sidecar(rgba, category: str):
-    """The draft to start from, and whether it was measured rather than guessed.
-
-    Only a measured top is trusted enough to publish unseen; a spread is a
-    starting position for the page, never a garment.
-    """
+    """The draft the page starts from: measured off the silhouette where a
+    finder can read one, spread over the bounding box where it cannot."""
     if category == "shirt":
         measured = auto_anchors.top_anchors(rgba)
         if measured is not None:
-            return _sidecar(measured, POINT_NAMES, measured["segments"], measured["occluders"]), True
+            return _sidecar(measured, POINT_NAMES, measured["segments"], measured["occluders"])
         # No sleeves were found because nothing was measured at all, so repaint
         # the arms - auto_anchors' own rule for a top that turned out sleeveless.
-        return _sidecar(top_layout(rgba), POINT_NAMES, ["torso"], BASE_OCCLUDERS + ["arms"]), False
+        return _sidecar(top_layout(rgba), POINT_NAMES, ["torso"], BASE_OCCLUDERS + ["arms"])
 
     if category == "pants":
         return _sidecar(bottom_layout(rgba, POINT_NAMES_BOTTOM), POINT_NAMES_BOTTOM,
                         ["seat", "left_upper_leg", "right_upper_leg",
-                         "left_lower_leg", "right_lower_leg"], ["hands", "shoes"]), False
+                         "left_lower_leg", "right_lower_leg"], ["hands", "shoes"])
 
     if category == "skirt":
         # Core points only: a skirt is one sheet of fabric with no leg seam, and
         # garment_library reads exactly this segment list as "warp it as a sheet".
         core = POINT_NAMES_BOTTOM[:CORE_POINT_COUNT_BOTTOM]
-        return _sidecar(bottom_layout(rgba, core), core, ["seat"], ["shoes"]), False
+        return _sidecar(bottom_layout(rgba, core), core, ["seat"], ["shoes"])
 
     raise ValueError(f"no such category {category!r} - pick one of {', '.join(RIG_BY_CATEGORY)}")
 
@@ -235,26 +232,8 @@ def validate(data: str, draft: dict, category: str, width: int, height: int) -> 
 # the last one left, and whoever was looking at that one now sees this one.
 _session = None
 
-# Where a photo waits for its category - the bot asks for them one after the
-# other. The page sends both in the same request and never touches this.
-_parked_photo = None
 
-
-def park_photo(chat_id, png: bytes):
-    """A photo arrives before its category, so it waits here for the button press."""
-    global _parked_photo
-    _parked_photo = png
-
-
-def take_photo(chat_id):
-    """The parked photo, once: a category press consumes it, so pressing a button
-    twice asks for a photo again."""
-    global _parked_photo
-    png, _parked_photo = _parked_photo, None
-    return png
-
-
-def new_session(chat_id, cutout: bytes, sidecar: dict, category: str):
+def new_session(cutout: bytes, sidecar: dict, category: str):
     """Park a draft for the anchor page, in place of whatever was open."""
     global _session
     height, width = decode(cutout).shape[:2]
@@ -267,20 +246,14 @@ def get_session():
     return _session
 
 
-def end_session(chat_id):
-    global _session
-    _session = None
-
-
 if __name__ == "__main__":
     if len(sys.argv) != 3:
         sys.exit(f"Usage: python anchor_session.py cutout.png [{'|'.join(RIG_BY_CATEGORY)}]")
 
     path, category = Path(sys.argv[1]), sys.argv[2]
     rgba = decode(path.read_bytes())
-    sidecar, trusted = initial_sidecar(rgba, category)
+    sidecar = initial_sidecar(rgba, category)
     print(json.dumps(sidecar, indent=2))
-    print(f"trusted: {trusted}")
 
     # Scratch, never beside the garment: this is a look at a draft, not a calibration.
     preview = Path(tempfile.gettempdir()) / f"{path.stem}.preview.png"

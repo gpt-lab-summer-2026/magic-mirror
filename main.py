@@ -19,7 +19,6 @@ import garment_overlay_skirt
 import garment_rig
 import garment_library
 import parser_thread
-import telegram_bot
 import tunnel
 
 # waitKeyEx codes for the arrows, Linux/Qt then Windows. They have no 8-bit
@@ -58,11 +57,8 @@ if use_parser:
     except ValueError as e:
         sys.exit(e)   # a hand-calibrated typo is still worth refusing to start over
 else:
-    labels = None   # the bot still publishes; it just resolves no occluder LUT
+    labels = None   # the page still publishes; it just resolves no occluder LUT
     print("No GPU: parser off, so garments draw over hands and bare arms.", flush=True)
-
-if telegram_bot.available():
-    telegram_bot.start(labels)
 
 if anchor_server.available():
     anchor_server.start(labels)

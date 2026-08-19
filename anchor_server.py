@@ -173,7 +173,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         try:
-            cutout, sidecar, _ = garment_publish.prepare(normalize.to_png(body), category)
+            cutout, sidecar = garment_publish.prepare(normalize.to_png(body), category)
         except ValueError as e:
             self._send_text(str(e), 400)
             return
@@ -181,7 +181,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_text(f"couldn't read that as a garment ({e})", 400)
             return
 
-        anchor_session.new_session(None, cutout, sidecar, category)
+        anchor_session.new_session(cutout, sidecar, category)
         self._send_text(f"{category} is ready")
 
     def _wear(self, body):
@@ -279,8 +279,8 @@ if __name__ == "__main__":
         sys.exit(f"Usage: python anchor_server.py cutout.png [{'|'.join(RIG_BY_CATEGORY)}]")
 
     cutout, category = Path(sys.argv[1]).read_bytes(), sys.argv[2]
-    sidecar, _ = anchor_session.initial_sidecar(anchor_session.decode(cutout), category)
-    anchor_session.new_session(None, cutout, sidecar, category)
+    sidecar = anchor_session.initial_sidecar(anchor_session.decode(cutout), category)
+    anchor_session.new_session(cutout, sidecar, category)
     print(f"http://127.0.0.1:{config.ANCHOR_APP_PORT}/ - password first, then the points", flush=True)
     try:
         _serve()

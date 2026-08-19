@@ -65,9 +65,3 @@ the `cloudflared` command in [tunnel.py](tunnel.py) changes.
 QR code has the URL, so the password is the only thing between them and the
 mirror. The server allows one guess a second, which a 4-digit PIN survives for
 under three hours and a three-word phrase survives for longer than the demo.
-
-## Bot
-
-Fill in `TELEGRAM_BOT_TOKEN` as well (see [.env.example](.env.example)) and the
-bot starts with `main.py` too. It only offers "Publish as is" for a top it could
-measure; everything else is placed on the phone page.

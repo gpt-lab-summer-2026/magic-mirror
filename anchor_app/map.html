@@ -8,13 +8,21 @@
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
   body {
-    margin: 0; height: 100vh; display: flex; flex-direction: column;
+    /* dvh first, vh for the browsers that don't know it: 100vh on a phone is
+       taller than the visible page, which pushes the footer buttons off it. */
+    margin: 0; height: 100vh; height: 100dvh; overflow: hidden;
+    display: flex; flex-direction: column;
     font: 14px/1.4 system-ui, sans-serif;
     background: #17212b;
     color: #f5f5f5;
   }
-  nav, #note, #statusLine { margin: 0; padding: 5px 10px; font-size: 12px; opacity: 0.75; }
-  a { color: #2ea6ff; }
+  #note, #statusLine { margin: 0; padding: 5px 10px; font-size: 12px; opacity: 0.75; }
+  nav { padding: 8px 8px 0; }
+  nav a {
+    display: block; padding: 11px; border-radius: 8px; text-align: center; text-decoration: none;
+    background: #24384a;
+    color: #f5f5f5;
+  }
   /* main and footer are display:flex, which outranks the browser's own [hidden] rule. */
   [hidden] { display: none !important; }
   main { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 0 8px; }
@@ -29,7 +37,8 @@
     background-position: 0 0, 16px 16px;
   }
   footer, #categories { display: flex; gap: 8px; padding: 8px; }
-  #intake { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  footer { padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
+  #intake { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
   footer button, #categories button {
     flex: 1; padding: 11px; border: 0; border-radius: 8px; font: inherit;
     background: #2ea6ff;
@@ -39,7 +48,7 @@
 </style>
 </head>
 <body>
-<nav><a href="/closet">closet</a></nav>
+<nav><a href="/closet">Closet</a></nav>
 <p id="note">Left and right are the wearer's, not the screen's: the left points sit on the image's right.</p>
 <main id="stage"><canvas id="canvas"></canvas></main>
 <section id="intake" hidden>

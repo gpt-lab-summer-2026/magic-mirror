@@ -136,10 +136,9 @@ def shoulder_points(mask):
     # A corner, not an extreme, so a shoulder under a collar and a 1px strap both survive.
     cols, top = top_edge(mask)
     middle = len(cols) // 2
-    # left_* is the image's left, not the wearer's: photographed front-up, a garment has its
-    # right sleeve there. Screen-side is the convention throughout - calibrate.py, the clicked
-    # sidecars, and the mirrored frame main.py feeds the pose model - and swapping it here
-    # alone would not mirror the garment but shrink it, a similarity fit having no reflection.
+    # Returned (image-left corner, image-right corner) - anatomical, not screen: a garment
+    # photographed front-up has the wearer's right sleeve on the image's left, same as
+    # calibrate.py's clicked sidecars. The caller is the one that attaches left/right names.
     halves = [(cols[:middle + 1], top[:middle + 1]),        # left half, cuff first
               (cols[middle:][::-1], top[middle:][::-1])]    # right half, cuff first
     corners = []
@@ -184,8 +183,10 @@ def along(start, through, distance):
 
 def hanging_wrist(shoulder, width, side):
     """No sleeve to follow, so the arm hangs: straight down, angled slightly out."""
+    # The left shoulder sits on the image's right (anatomical, not screen-side - see
+    # shoulder_points), so the left arm hangs further right, out and away from the torso.
     out, down = HANGING_ARM
-    sign = -1 if side == "left" else 1
+    sign = 1 if side == "left" else -1
     return (shoulder[0] + sign * out * width, shoulder[1] + down * width)
 
 
@@ -205,9 +206,13 @@ def top_anchors(rgba):
     # The thickest skeleton pixel is the middle of the torso: every path walks out from there.
     seed = np.unravel_index(radius_map.argmax(), radius_map.shape)
 
-    (left_x, left_y), (right_x, right_y) = shoulder_points(mask)
-    arms = find_arms(paths_to_ends(skel, neighbours, seed), radius_map, height, seed,
-                     right_x - left_x)
+    # shoulder_points and find_arms split the image geometrically, in screen order; the
+    # wearer's left shoulder/sleeve is the one on the image's right (see shoulder_points).
+    screen_left, screen_right = shoulder_points(mask)
+    width = screen_right[0] - screen_left[0]
+    screen_left_arm, screen_right_arm = find_arms(
+        paths_to_ends(skel, neighbours, seed), radius_map, height, seed, width)
+    arms = (screen_right_arm, screen_left_arm)
 
     def at(row):
         i = int(np.searchsorted(rows, row).clip(0, len(rows) - 1))
@@ -219,14 +224,13 @@ def top_anchors(rgba):
         return garment_run(mask, row, column)
 
     _, hem = spine(rows, centers, radius, seed[0])
-    hip_y = hip_row(torso_top(rows, radius), right_x - left_x, rows[hem])
+    hip_y = hip_row(torso_top(rows, radius), width, rows[hem])
     hip_left, hip_right = torso_run(hip_y)
     points = {
-        "left_shoulder": (left_x, left_y),
-        "right_shoulder": (right_x, right_y),
+        "left_shoulder": screen_right,
+        "right_shoulder": screen_left,
         "hip_center": ((hip_left + hip_right) / 2, hip_y),
     }
-    width = right_x - left_x
     to_the_wrist = []
     for side, arm in zip(("left", "right"), arms):
         shoulder = points[f"{side}_shoulder"]

@@ -11,7 +11,6 @@ and simply never shows the button.
 import asyncio
 import os
 import threading
-from pathlib import Path
 
 from dotenv import load_dotenv
 from telegram import KeyboardButton, ReplyKeyboardMarkup, WebAppInfo
@@ -20,7 +19,6 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
 import anchor_server
 import anchor_session
-import config
 import garment_publish
 import normalize
 from garment_types import RIG_BY_CATEGORY
@@ -49,22 +47,12 @@ def available():
 
 
 def start(labels):
-    """Wipe the bot folder, then poll Telegram on a daemon thread."""
+    """Poll Telegram on a daemon thread."""
     global _labels
     _labels = labels
-    _wipe()
     # daemon for parser_thread.py's reason: `q` has to end the process even
     # mid-upload, and a half-finished garment is nothing worth protecting.
     threading.Thread(target=_run, daemon=True).start()
-
-
-def _wipe():
-    """Nothing an upload produced outlives a restart. At startup rather than at
-    shutdown, because a crash or a power cut never reaches a shutdown handler."""
-    directory = Path(config.BOT_GARMENT_DIR)
-    for pattern in ("*.png", "*.anchors.json"):
-        for f in directory.glob(pattern):
-            f.unlink()
 
 
 def _run():

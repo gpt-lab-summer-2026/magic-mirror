@@ -8,6 +8,8 @@ each.
 import json
 from pathlib import Path
 
+import cv2
+
 import config
 import garment_overlay
 import garment_overlay_bottom
@@ -23,7 +25,7 @@ _index = 0
 _BOTTOM_SEGMENT_NAMES = frozenset(garment_overlay_bottom.SEGMENT_REQUIRED_POINTS)
 
 
-def _garment_class(anchors_path: Path):
+def _garment_class(raw_anchors: dict):
     """
     Which class a garment needs, read purely from its own declared "segments"
 
@@ -39,8 +41,7 @@ def _garment_class(anchors_path: Path):
     at least one leg segment alongside "seat") is a GarmentBottom.
     Anything that doesn't touch bottom names at all is a top/dress.
     """
-    with open(anchors_path) as f:
-        declared = set(json.load(f).get("segments", []))
+    declared = set(raw_anchors.get("segments", []))
     if declared == {"seat"}:
         return garment_overlay_skirt.GarmentSkirt
     if declared & _BOTTOM_SEGMENT_NAMES:
@@ -49,12 +50,27 @@ def _garment_class(anchors_path: Path):
 
 
 def build(png: Path):
-    """The one place a Garment is made: picks its class from the sidecar, then names it."""
-    garment = _garment_class(png.with_suffix(".anchors.json"))(str(png))
-    # Garment has no use for either, so both are attached here rather than in the
-    # class - and here, so that nothing downstream can meet a nameless garment.
-    garment.name = png.stem
+    """A garment from its two files on disk, named after them."""
+    rgba = cv2.imread(str(png), cv2.IMREAD_UNCHANGED)
+    if rgba is None:
+        raise FileNotFoundError(f"Could not read garment image: {png}")
+    with open(png.with_suffix(".anchors.json")) as f:
+        raw_anchors = json.load(f)
+    garment = build_from_memory(rgba, raw_anchors, name=png.stem)
     garment.path = png.resolve()
+    return garment
+
+
+def build_from_memory(rgba, raw_anchors: dict, name: str):
+    """The one place a Garment is made: its class from the sidecar, then built.
+
+    Neither attribute belongs to the class, so both are attached here - and
+    here, so nothing downstream can meet a nameless garment. path stays None
+    until a caller has a file to point at, which is what marks an upload.
+    """
+    garment = _garment_class(raw_anchors)(rgba, raw_anchors, label=name)
+    garment.name = name
+    garment.path = None
     return garment
 
 
@@ -78,10 +94,10 @@ def load(directory: str = config.GARMENT_DIR):
 
 
 def replace_or_add(garment):
-    """One slot per folder, and show it: an upload evicts the last upload, not a demo."""
+    """One upload slot, and show it: an upload evicts the last upload, not a demo."""
     global _index
     for i, existing in enumerate(GARMENTS):
-        if existing.path.parent == garment.path.parent:
+        if existing.path is None:     # the upload slot: the only garment with no file
             GARMENTS[i] = garment
             _index = i
             return

@@ -26,7 +26,7 @@ Bottoms (--bottom) - garment_overlay_bottom.POINT_NAMES_BOTTOM:
 The points past each list's core prefix are exactly the ones a sleeveless
 top or a skirt doesn't need — pressing s early only saves the points you
 actually clicked. What actually enforces "every point a garment's declared
-segments need must exist" is garment_rig.load_calibration at runtime, not
+segments need must exist" is garment_rig.check_calibration at runtime, not
 this file — so calibrate.py itself never needs to know which segments a
 garment ends up declaring.
 

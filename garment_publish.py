@@ -12,14 +12,11 @@ accepted as it stands.
 Usage:
     python garment_publish.py photo.jpg shirt
 """
-import json
 import sys
-from pathlib import Path
 
 import anchor_session
 import bg_remove
 import composite
-import config
 import garment_library
 import normalize
 from garment_types import RIG_BY_CATEGORY
@@ -34,17 +31,11 @@ def prepare(png: bytes, category: str):
 
 def finish(cutout: bytes, sidecar: dict, category: str, labels=None) -> str:
     """A cutout and the anchors it ended up with, onto the mirror. Returns what to reply."""
-    # Garment reads an image path and derives its sidecar path from it, so both
-    # have to exist on disk, adjacent, sharing a stem. The category is the name,
-    # which is also why no string a user typed ever reaches a path.
-    directory = Path(config.BOT_GARMENT_DIR)
-    directory.mkdir(parents=True, exist_ok=True)
-    image_path = directory / f"{category}.png"
-    image_path.write_bytes(cutout)
-    with open(image_path.with_suffix(".anchors.json"), "w") as f:
-        json.dump(sidecar, f, indent=2)
-
-    garment = garment_library.build(image_path)
+    # The upload never touches the disk: it is built straight from the two
+    # values it already is. The category is the name, which is also why no
+    # string a user typed ever reaches a path.
+    garment = garment_library.build_from_memory(
+        anchor_session.decode(cutout), sidecar, name=category)
     if labels is not None:
         # Before publishing, never after: the render loop reads the LUT with no guard.
         try:

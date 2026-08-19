@@ -43,7 +43,7 @@ POINT_COLORS = [
 RIG_KEYS = ("segments", "occluders")
 
 # Which points a rig collects, how many of them it cannot do without, and what
-# each of its segments needs - the very map garment_rig.load_calibration checks
+# each of its segments needs - the very map garment_rig.check_calibration checks
 # a sidecar against. Keyed by rig, so garment_types.py stays the only list of
 # categories.
 RIGS = {
@@ -123,7 +123,7 @@ def top_layout(rgba):
 def _sidecar(points, point_names, segments, occluders):
     """One sidecar shape for every category: whole pixels, in point_names order -
     so a colour index means the same thing in the file, on the preview and on the
-    page - then the two keys garment_rig.load_calibration insists on."""
+    page - then the two keys garment_rig.check_calibration insists on."""
     sidecar = {name: [int(points[name][0]), int(points[name][1])]
                for name in point_names if name in points}
     sidecar["segments"] = segments
@@ -220,7 +220,7 @@ def validate(data: str, draft: dict, category: str, width: int, height: int) -> 
             raise ValueError(f"{name} landed outside the image")
 
     # A segment whose points were switched off is one this garment can no longer
-    # wear: the rule load_calibration enforces at load time, applied here where
+    # wear: the rule check_calibration enforces at load time, applied here where
     # there is still somebody to tell. A top left with no sleeve points comes out
     # of it as ["torso"], which is what makes it sleeveless - so its bare arms
     # get repainted, exactly as auto_anchors does for a sleeveless measurement.

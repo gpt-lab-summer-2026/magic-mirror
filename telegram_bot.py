@@ -5,19 +5,18 @@ Shaped like parser_thread.py: available() then start(), the thread owned here,
 so main.py never sees an event loop. No token on a dev machine means no bot,
 the same way no GPU means no parser - not a crash, not a branch in main.py.
 
-The anchor page is offered the same way: with no ANCHOR_APP_URL the bot runs
-and simply never shows the button.
+Anchor points are placed on the phone page now (anchor_server.py), which the
+mirror hands out as a QR code, so the bot only offers a draft it could measure.
 """
 import asyncio
 import os
 import threading
 
 from dotenv import load_dotenv
-from telegram import KeyboardButton, ReplyKeyboardMarkup, WebAppInfo
+from telegram import KeyboardButton, ReplyKeyboardMarkup
 from telegram.error import TelegramError
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
-import anchor_server
 import anchor_session
 import garment_publish
 import normalize
@@ -32,7 +31,6 @@ KEYBOARD = ReplyKeyboardMarkup([list(RIG_BY_CATEGORY)], resize_keyboard=True, on
 
 # A button's text is what comes back as a message, so the two live in one place.
 PUBLISH_AS_IS = "Publish as is"
-PLACE_POINTS = "Place points"
 
 # Per chat, not one global flag: the first person through must not unlock the
 # bot for everyone. It lives for the process, so a restart locks every chat.
@@ -159,17 +157,13 @@ async def _offer(update, category):
     # spread over the bounding box, and nobody wants that on the mirror.
     if trusted:
         buttons.append(KeyboardButton(PUBLISH_AS_IS))
-    if anchor_server.APP_URL:
-        # No token in the URL any more: the page asks for the password and
-        # then opens on the one session, which is the one just parked here.
-        buttons.append(KeyboardButton(PLACE_POINTS, web_app=WebAppInfo(url=anchor_server.APP_URL)))
     if not buttons:
         anchor_session.end_session(chat_id)
         if RIG_BY_CATEGORY[category] == "top":
             await update.message.reply_text(
                 "couldn't find the shoulders - try a flatter photo against a plain background")
         else:
-            await update.message.reply_text(f"{category} needs the anchor page, and ANCHOR_APP_URL is not set")
+            await update.message.reply_text(f"{category} needs the anchor page - scan the QR code on the mirror")
         return
 
     await update.message.reply_photo(

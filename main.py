@@ -20,6 +20,7 @@ import garment_rig
 import garment_library
 import parser_thread
 import telegram_bot
+import tunnel
 
 # waitKeyEx codes for the arrows, Linux/Qt then Windows. They have no 8-bit
 # form, which is why the loop reads waitKeyEx and never masks with 0xFF -
@@ -65,6 +66,9 @@ if telegram_bot.available():
 
 if anchor_server.available():
     anchor_server.start(labels)
+
+if tunnel.available():
+    tunnel.start()
 
 smoother = garment_rig.LandmarkSmoother(alpha=0.4)
 frame_ms = 1000 / config.CAPTURE_FPS   # smoothed; the raw per-frame number is unreadable jitter
@@ -149,6 +153,7 @@ with vision.PoseLandmarker.create_from_options(options) as landmarker:
                     t = debug_hud.mark("occlude", t)
 
         shown = display.crop_to_display(frame)
+        tunnel.draw(shown)   # after the crop, so the corner is always on screen
         if name_frames > 0 and garment is not None:
             name_frames -= 1
             cv2.putText(shown, garment.name, (20, shown.shape[0] - 30),

@@ -43,23 +43,31 @@ The human parser needs a GPU — it runs at ~1.5 s per frame on CPU and starves
 the render loop, so without CUDA it is skipped. Everything else works; garments
 just draw over hands and bare arms instead of behind them.
 
-## Bot
+## Phone page
 
-Fill in `TELEGRAM_BOT_TOKEN` and `GARMENT_BOT_PASSWORD` in `.env` (see
-[.env.example](.env.example)) and the bot starts with `main.py`.
-
-Placing anchor points by hand happens on a web page, and Telegram only opens
-those over https, so a tunnel puts a public URL in front of the local server:
+Uploading a garment and placing its anchor points happens on a web page. The
+server binds to localhost, so a tunnel puts a public https URL in front of it:
 
 ```bash
 winget install --id Cloudflare.cloudflared    # or: brew install cloudflared
-cloudflared tunnel --url http://localhost:8080   # ANCHOR_APP_PORT in config.py
 ```
 
-Copy the `https://<something>.trycloudflare.com` URL it prints into
-`ANCHOR_APP_URL` in `.env` and start `main.py`. That URL changes every time
-cloudflared restarts; a free Cloudflare account and a domain buy a *named*
-tunnel with a fixed one, and nothing in the code changes.
+`main.py` starts cloudflared itself and shows the URL it prints as a QR code in
+the corner of the mirror — scan it, type the password. With no cloudflared on
+PATH there is no QR code and no tunnel; the page is still at
+`http://127.0.0.1:8080` for a laptop.
 
-Without `ANCHOR_APP_URL` the bot still runs - it just offers "Publish as is"
-for tops it could measure, and nothing for anything else.
+That URL changes every restart, which is why nothing stores it. A free
+Cloudflare account and a domain buy a *named* tunnel with a fixed one, and only
+the `cloudflared` command in [tunnel.py](tunnel.py) changes.
+
+**`GARMENT_BOT_PASSWORD` in `.env` has to be strong.** Everyone who can see the
+QR code has the URL, so the password is the only thing between them and the
+mirror. The server allows one guess a second, which a 4-digit PIN survives for
+under three hours and a three-word phrase survives for longer than the demo.
+
+## Bot
+
+Fill in `TELEGRAM_BOT_TOKEN` as well (see [.env.example](.env.example)) and the
+bot starts with `main.py` too. It only offers "Publish as is" for a top it could
+measure; everything else is placed on the phone page.

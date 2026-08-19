@@ -32,9 +32,6 @@ import normalize
 from garment_types import RIG_BY_CATEGORY
 
 load_dotenv()
-# Where the tunnel answers, which is the only address the phone can use. Read
-# once, here: telegram_bot.py builds its button from this same string.
-APP_URL = os.getenv("ANCHOR_APP_URL")
 PASSWORD = os.getenv("GARMENT_BOT_PASSWORD")
 
 PAGE_DIR = Path(__file__).parent / "anchor_app"
@@ -61,7 +58,7 @@ _login_lock = threading.Lock()
 def available():
     """No password means no page at all: it is the only thing between a room
     that can see the QR code and the mirror."""
-    return bool(APP_URL and PASSWORD)
+    return bool(PASSWORD)
 
 
 def start(labels):

@@ -20,13 +20,14 @@ import time
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from dotenv import load_dotenv
 
 import anchor_session
 import config
 import garment_publish
+import normalize
 from garment_types import RIG_BY_CATEGORY
 
 load_dotenv()
@@ -86,6 +87,10 @@ class _Handler(BaseHTTPRequestHandler):
         if route == "/map":
             self._send_page("map.html")
             return
+        if route == "/categories":
+            # The page holds no copy of this list, so a fourth category is one edit.
+            self._send("application/json", json.dumps(list(RIG_BY_CATEGORY)).encode())
+            return
 
         session = anchor_session.get_session()
         if session is None:
@@ -98,11 +103,11 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_empty(404)
 
     def do_POST(self):
-        route = urlparse(self.path).path
+        route = urlparse(self.path)
         # Cookie first, body last: an unauthorized request then costs the server
         # nothing. The other way round, anyone who scanned the QR code could make
         # the laptop swallow 20 MB per request and only then hear 403.
-        if route != "/login" and not self._authorized():
+        if route.path != "/login" and not self._authorized():
             self._send_empty(403)
             return
 
@@ -112,9 +117,12 @@ class _Handler(BaseHTTPRequestHandler):
             return
         body = self.rfile.read(length)
 
-        if route == "/login":
+        if route.path == "/login":
             self._login(body)
-        elif route == "/wear":
+        elif route.path == "/upload":
+            with _lock:
+                self._upload(parse_qs(route.query).get("category", [""])[0], body)
+        elif route.path == "/wear":
             with _lock:
                 self._wear(body)
         else:
@@ -141,6 +149,25 @@ class _Handler(BaseHTTPRequestHandler):
         # Strict: no other site can make the phone POST /wear behind its back.
         self._send("text/plain; charset=utf-8", b"", 200,
                    cookie=f"{COOKIE}={key}; Path=/; Secure; HttpOnly; SameSite=Strict")
+
+    def _upload(self, category, body):
+        """A photo, cut out and drafted, in place of whatever session was open.
+
+        Broad except: this is an arbitrary file off a phone, and every way it can
+        fail is one line back to whoever sent it rather than a wait with no reply.
+        """
+        if category not in RIG_BY_CATEGORY:
+            self._send_text(f"no such category {category!r}", 400)
+            return
+
+        try:
+            cutout, sidecar, _ = garment_publish.prepare(normalize.to_png(body), category)
+        except Exception as e:
+            self._send_text(f"couldn't read that as a garment ({e})", 400)
+            return
+
+        anchor_session.new_session(None, cutout, sidecar, category)
+        self._send_text(f"{category} is ready")
 
     def _wear(self, body):
         """The anchors the page ended up with, onto the mirror. A bad point is 400

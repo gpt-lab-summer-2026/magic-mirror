@@ -14,6 +14,8 @@
     color: #f5f5f5;
   }
   #note, #statusLine { margin: 0; padding: 5px 10px; font-size: 12px; opacity: 0.75; }
+  /* main and footer are display:flex, which outranks the browser's own [hidden] rule. */
+  [hidden] { display: none !important; }
   main { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 0 8px; }
   /* The checkerboard the preview photo is composited on, in CSS - the cutout is
      transparent, and a garment edge over a flat colour is impossible to judge. */
@@ -25,8 +27,9 @@
     background-size: 32px 32px;
     background-position: 0 0, 16px 16px;
   }
-  footer { display: flex; gap: 8px; padding: 8px; }
-  footer button {
+  footer, #categories { display: flex; gap: 8px; padding: 8px; }
+  #intake { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  footer button, #categories button {
     flex: 1; padding: 11px; border: 0; border-radius: 8px; font: inherit;
     background: #2ea6ff;
     color: #ffffff;
@@ -36,9 +39,14 @@
 </head>
 <body>
 <p id="note">Left and right are the wearer's, not the screen's: the left points sit on the image's right.</p>
-<main><canvas id="canvas"></canvas></main>
+<main id="stage"><canvas id="canvas"></canvas></main>
+<section id="intake" hidden>
+  <input id="photo" type="file" accept="image/*">
+  <div id="categories"></div>
+</section>
 <p id="statusLine"></p>
-<footer>
+<footer id="tools">
+  <button id="newPhoto">New photo</button>
   <button id="undo">Undo</button>
   <button id="wear">Wear garment</button>
 </footer>
@@ -48,6 +56,11 @@ const canvas = document.getElementById("canvas");
 const context = canvas.getContext("2d");
 const statusLine = document.getElementById("statusLine");
 const wear = document.getElementById("wear");
+const note = document.getElementById("note");
+const stage = document.getElementById("stage");
+const tools = document.getElementById("tools");
+const intake = document.getElementById("intake");
+const photo = document.getElementById("photo");
 
 let session = null;     // what /session sent: point names, core count, size, colours
 let image = null;       // the cutout itself
@@ -58,7 +71,9 @@ let scale = 1;          // image pixels -> CSS pixels
 
 async function load() {
   const answer = await fetch("/session");
-  if (!answer.ok) throw new Error("this page has expired - send the photo again");
+  if (answer.status === 403) { location = "/"; return; }   // the cookie is gone: log in again
+  await buildCategories();
+  if (!answer.ok) { showIntake(); return; }                // nothing uploaded yet
   session = await answer.json();
 
   image = new Image();
@@ -69,6 +84,36 @@ async function load() {
   });
 
   layout();
+}
+
+
+// --- intake: a photo, and what it is ---
+
+async function buildCategories() {
+  // The list comes from the server, so the page holds no copy of it. textContent
+  // and not innerHTML, for everything the server says, as a habit.
+  for (const category of await (await fetch("/categories")).json()) {
+    const button = document.createElement("button");
+    button.textContent = category;
+    button.addEventListener("click", () => upload(category));
+    document.getElementById("categories").appendChild(button);
+  }
+}
+
+function showIntake() {
+  intake.hidden = false;
+  note.hidden = stage.hidden = tools.hidden = true;
+}
+
+async function upload(category) {
+  if (!photo.files.length) { statusLine.textContent = "pick a photo first"; return; }
+  statusLine.textContent = "working on the " + category + "...";
+  // The file's own bytes and nothing wrapped round them: http.server has no
+  // multipart parser, and sent this way it needs none.
+  const response = await fetch("/upload?category=" + category,
+                               { method: "POST", body: photo.files[0] });
+  if (response.ok) location.reload();
+  else statusLine.textContent = await response.text();
 }
 
 
@@ -174,6 +219,8 @@ canvas.addEventListener("pointercancel", () => { dragging = false; });
 
 // --- the two buttons ---
 
+document.getElementById("newPhoto").addEventListener("click", showIntake);
+
 document.getElementById("undo").addEventListener("click", () => {
   points.pop();
   refresh();
@@ -191,7 +238,7 @@ wear.addEventListener("click", async () => {
 });
 
 
-window.addEventListener("resize", () => { if (session) layout(); });
+window.addEventListener("resize", () => { if (session && !stage.hidden) layout(); });
 load().catch(error => { statusLine.textContent = error.message; });
 </script>
 </body>

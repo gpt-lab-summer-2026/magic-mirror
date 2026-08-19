@@ -19,7 +19,7 @@ import qrcode
 
 import config
 
-QR_PX = 150     # side of the code on the cropped frame
+QR_PX = 120     # side of the code on the cropped frame
 MARGIN = 16     # from the frame's top-left corner
 
 _qr = None      # BGR array pasted on every frame; None until the tunnel is up

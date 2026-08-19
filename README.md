@@ -42,3 +42,24 @@ that link does not resolve it falls back to `CAMERA_INDEX`.
 The human parser needs a GPU — it runs at ~1.5 s per frame on CPU and starves
 the render loop, so without CUDA it is skipped. Everything else works; garments
 just draw over hands and bare arms instead of behind them.
+
+## Bot
+
+Fill in `TELEGRAM_BOT_TOKEN` and `GARMENT_BOT_PASSWORD` in `.env` (see
+[.env.example](.env.example)) and the bot starts with `main.py`.
+
+Placing anchor points by hand happens on a web page, and Telegram only opens
+those over https, so a tunnel puts a public URL in front of the local server:
+
+```bash
+winget install --id Cloudflare.cloudflared    # or: brew install cloudflared
+cloudflared tunnel --url http://localhost:8080   # ANCHOR_APP_PORT in config.py
+```
+
+Copy the `https://<something>.trycloudflare.com` URL it prints into
+`ANCHOR_APP_URL` in `.env` and start `main.py`. That URL changes every time
+cloudflared restarts; a free Cloudflare account and a domain buy a *named*
+tunnel with a fixed one, and nothing in the code changes.
+
+Without `ANCHOR_APP_URL` the bot still runs - it just offers "Publish as is"
+for tops it could measure, and nothing for anything else.

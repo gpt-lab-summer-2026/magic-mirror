@@ -7,6 +7,7 @@ import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
+import anchor_server
 import camera
 import composite
 import config
@@ -61,6 +62,9 @@ else:
 
 if telegram_bot.available():
     telegram_bot.start(labels)
+
+if anchor_server.available():
+    anchor_server.start()
 
 smoother = garment_rig.LandmarkSmoother(alpha=0.4)
 frame_ms = 1000 / config.CAPTURE_FPS   # smoothed; the raw per-frame number is unreadable jitter

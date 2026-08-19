@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Place the points</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; height: 100vh; display: flex; flex-direction: column;
+    font: 14px/1.4 system-ui, sans-serif;
+    background: var(--tg-theme-bg-color, #17212b);
+    color: var(--tg-theme-text-color, #f5f5f5);
+  }
+  #note, #statusLine { margin: 0; padding: 5px 10px; font-size: 12px; opacity: 0.75; }
+  main { flex: 1; min-height: 0; display: flex; gap: 8px; padding: 0 8px; }
+  #stage { flex: 1; min-width: 0; min-height: 0; display: flex; align-items: center; justify-content: center; }
+  /* The checkerboard the preview photo is composited on, in CSS - the cutout is
+     transparent, and a garment edge over a flat colour is impossible to judge. */
+  canvas {
+    display: block; touch-action: none;
+    background-color: #3c3c3c;
+    background-image: linear-gradient(45deg, #5a5a5a 25%, transparent 25%, transparent 75%, #5a5a5a 75%),
+                      linear-gradient(45deg, #5a5a5a 25%, transparent 25%, transparent 75%, #5a5a5a 75%);
+    background-size: 32px 32px;
+    background-position: 0 0, 16px 16px;
+  }
+  #points { list-style: none; margin: 0; padding: 0; width: 175px; overflow-y: auto; }
+  #points li { display: flex; align-items: center; gap: 6px; padding: 3px 4px; border-radius: 6px; }
+  #points li.selected { background: #2b5278; }
+  #points li.unplaced .name { opacity: 0.45; }
+  .chip { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+  .name { flex: 1; text-align: left; padding: 2px; background: none; border: 0; color: inherit; font: inherit; }
+  footer { display: flex; gap: 8px; padding: 8px; }
+  footer button {
+    flex: 1; padding: 11px; border: 0; border-radius: 8px; font: inherit;
+    background: var(--tg-theme-button-color, #2ea6ff);
+    color: var(--tg-theme-button-text-color, #ffffff);
+  }
+  @media (max-width: 520px) {
+    main { flex-direction: column; }
+    #points { width: auto; max-height: 26vh; }
+  }
+</style>
+</head>
+<body>
+<p id="note">Left and right are the wearer's, not the screen's: the left points sit on the image's right.</p>
+<main>
+  <div id="stage"><canvas id="canvas"></canvas></div>
+  <ul id="points"></ul>
+</main>
+<p id="statusLine"></p>
+<footer>
+  <button id="undo">Undo</button>
+  <button id="reset">Reset to draft</button>
+  <button id="save">Save</button>
+</footer>
+
+<script>
+// The page is only ever opened as .../?t=<token>, and that token is the whole
+// of its access to the mirror: one draft, one cutout, for as long as the
+// upload it belongs to is still open.
+const token = new URLSearchParams(location.search).get("t") || "";
+// The bridge script loads in any browser at all; only inside Telegram does it
+// have a client behind it, and outside one sendData is dropped without a word.
+const telegram = window.Telegram && window.Telegram.WebApp;
+const inTelegram = Boolean(telegram) && telegram.platform !== "unknown";
+
+const canvas = document.getElementById("canvas");
+const context = canvas.getContext("2d");
+const list = document.getElementById("points");
+const statusLine = document.getElementById("statusLine");
+
+const HIT_RADIUS = 24;   // CSS px, sized for a fingertip rather than a mouse
+
+let session = null;        // what /session sent: point names, core count, size, colours
+let image = null;          // the cutout itself
+let anchors = {};          // name -> [x, y] in image pixels, which is what gets saved
+let excluded = new Set();  // optional points switched off in the list
+let undoStack = [];        // one entry per change
+let selected = null;       // a name tapped in the list, waiting for a tap on the image
+let dragging = null;       // a name being dragged right now
+let scale = 1;             // image pixels -> CSS pixels
+
+
+async function load() {
+  const answer = await fetch("/session?t=" + encodeURIComponent(token));
+  if (!answer.ok) throw new Error("this page has expired - send the photo again");
+  session = await answer.json();
+
+  image = new Image();
+  await new Promise((resolve, reject) => {
+    image.onload = resolve;
+    image.onerror = () => reject(new Error("the cutout would not load - send the photo again"));
+    image.src = "/image?t=" + encodeURIComponent(token);
+  });
+
+  buildList();
+  reset();
+  layout();
+}
+
+
+// --- the draft, and the two coordinate spaces ---
+
+function reset() {
+  anchors = {};
+  for (const name of Object.keys(session.anchors)) {
+    const [x, y] = session.anchors[name];
+    anchors[name] = clamp(x, y);
+  }
+  excluded = new Set();
+  undoStack = [];
+  select(null);
+}
+
+function clamp(x, y) {
+  // A measured wrist can sit outside the picture, and a dot off the canvas is
+  // one nobody can drag back. Whole pixels, because that is what gets saved.
+  return [Math.min(Math.max(Math.round(x), 0), session.width - 1),
+          Math.min(Math.max(Math.round(y), 0), session.height - 1)];
+}
+
+function toCanvas(point) {
+  return [point[0] * scale, point[1] * scale];
+}
+
+function moveTo(name, canvasX, canvasY) {
+  // A fresh pair every time: the undo snapshots copy this object shallowly, so
+  // editing a pair in place would rewrite the history as well.
+  anchors[name] = clamp(canvasX / scale, canvasY / scale);
+  refresh();
+}
+
+function placed() {
+  return session.point_names.filter(name => anchors[name] && !excluded.has(name));
+}
+
+function colorOf(name) {
+  return session.colors[session.point_names.indexOf(name) % session.colors.length];
+}
+
+
+// --- drawing ---
+
+function layout() {
+  const stage = canvas.parentElement;
+  scale = Math.min(stage.clientWidth / session.width, stage.clientHeight / session.height);
+  const ratio = window.devicePixelRatio || 1;
+  canvas.style.width = session.width * scale + "px";
+  canvas.style.height = session.height * scale + "px";
+  canvas.width = Math.round(session.width * scale * ratio);
+  canvas.height = Math.round(session.height * scale * ratio);
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);   // so everything below is drawn in CSS pixels
+  draw();
+}
+
+function draw() {
+  const width = session.width * scale, height = session.height * scale;
+  context.clearRect(0, 0, width, height);
+  context.drawImage(image, 0, 0, width, height);
+  context.font = "12px system-ui, sans-serif";
+  for (const name of placed()) {
+    const [x, y] = toCanvas(anchors[name]);
+    context.fillStyle = colorOf(name);
+    context.strokeStyle = "#000000";
+    context.beginPath();
+    context.arc(x, y, name === selected ? 9 : 7, 0, 2 * Math.PI);
+    context.fill();
+    context.lineWidth = 2;
+    context.stroke();
+    // A label that would run off the canvas goes to the dot's left and a line
+    // lower instead, clear of whatever label its neighbour is already wearing.
+    // Every bottom keeps its wearer's-left points against the right edge, so
+    // this is the common case, not the corner one.
+    const label = context.measureText(name).width;
+    const fits = x + 11 + label < width;
+    const labelX = fits ? x + 11 : x - 11 - label;
+    const labelY = fits ? y - 9 : y + 17;
+    context.lineWidth = 3;
+    context.strokeText(name, labelX, labelY);
+    context.fillText(name, labelX, labelY);
+  }
+}
+
+
+// --- input: drag the nearest dot, or place the selected name ---
+
+function pointerAt(event) {
+  const rect = canvas.getBoundingClientRect();
+  return [event.clientX - rect.left, event.clientY - rect.top];
+}
+
+function nearest(x, y) {
+  let best = null, shortest = HIT_RADIUS;
+  for (const name of placed()) {
+    const [px, py] = toCanvas(anchors[name]);
+    const distance = Math.hypot(px - x, py - y);
+    if (distance <= shortest) {
+      best = name;
+      shortest = distance;
+    }
+  }
+  return best;
+}
+
+canvas.addEventListener("pointerdown", event => {
+  const [x, y] = pointerAt(event);
+  const near = nearest(x, y);
+  if (near) {
+    remember();
+    dragging = near;
+    canvas.setPointerCapture(event.pointerId);
+    moveTo(near, x, y);
+  } else if (selected) {
+    remember();
+    excluded.delete(selected);
+    moveTo(selected, x, y);
+    select(null);
+  }
+});
+
+canvas.addEventListener("pointermove", event => {
+  if (dragging) {
+    const [x, y] = pointerAt(event);
+    moveTo(dragging, x, y);
+  }
+});
+
+canvas.addEventListener("pointerup", () => { dragging = null; });
+canvas.addEventListener("pointercancel", () => { dragging = null; });
+
+
+// --- the list of names ---
+
+function buildList() {
+  session.point_names.forEach((name, i) => {
+    const row = document.createElement("li");
+    row.dataset.name = name;
+
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.style.background = colorOf(name);
+
+    const label = document.createElement("button");
+    label.className = "name";
+    label.textContent = i < session.core ? name : name + " (optional)";
+    label.addEventListener("click", () => select(selected === name ? null : name));
+
+    row.append(chip, label);
+    // Only the optional points get a switch: a garment without its core points
+    // is not a garment, so there is nothing to offer there.
+    if (i >= session.core) {
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.addEventListener("change", () => toggle(name, box.checked));
+      row.append(box);
+    }
+    list.append(row);
+  });
+}
+
+function toggle(name, on) {
+  remember();
+  if (on) {
+    excluded.delete(name);
+  } else {
+    excluded.add(name);
+  }
+  if (on && !anchors[name]) {
+    select(name);   // nothing to switch on yet, so the next tap on the image places it
+  } else {
+    refresh();
+  }
+}
+
+function select(name) {
+  selected = name;
+  statusLine.textContent = name
+    ? "tap the image to place " + name
+    : "drag a dot, or tap a name and then the image";
+  refresh();
+}
+
+function refresh() {
+  for (const row of list.children) {
+    const name = row.dataset.name;
+    const box = row.querySelector("input");
+    if (box) box.checked = Boolean(anchors[name]) && !excluded.has(name);
+    row.classList.toggle("selected", name === selected);
+    row.classList.toggle("unplaced", !anchors[name]);
+  }
+  draw();
+}
+
+
+// --- the three buttons ---
+
+function remember() {
+  undoStack.push({ anchors: Object.assign({}, anchors), excluded: new Set(excluded) });
+}
+
+document.getElementById("undo").addEventListener("click", () => {
+  const previous = undoStack.pop();
+  if (!previous) return;
+  anchors = previous.anchors;
+  excluded = previous.excluded;
+  select(null);
+});
+
+document.getElementById("reset").addEventListener("click", () => reset());
+
+document.getElementById("save").addEventListener("click", () => {
+  const anchorsToSave = {};
+  for (const name of placed()) anchorsToSave[name] = anchors[name];
+  const json = JSON.stringify(anchorsToSave);
+  if (inTelegram) {
+    telegram.sendData(json);
+    telegram.close();
+  } else {
+    // Nowhere to send it from a desktop browser, so show what would have gone.
+    console.log(json);
+    alert(json);
+  }
+});
+
+
+if (inTelegram) {
+  telegram.expand();
+  // Otherwise a drag near the top edge pulls the whole sheet shut instead.
+  if (telegram.disableVerticalSwipes) telegram.disableVerticalSwipes();
+}
+window.addEventListener("resize", () => { if (session) layout(); });
+load().catch(error => { statusLine.textContent = error.message; });
+</script>
+</body>
+</html>

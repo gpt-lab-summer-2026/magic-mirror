@@ -4,6 +4,9 @@ Telegram in, garment on the mirror.
 Shaped like parser_thread.py: available() then start(), the thread owned here,
 so main.py never sees an event loop. No token on a dev machine means no bot,
 the same way no GPU means no parser - not a crash, not a branch in main.py.
+
+The anchor page is offered the same way: with no ANCHOR_APP_URL the bot runs
+and simply never shows the button.
 """
 import asyncio
 import os
@@ -11,10 +14,12 @@ import threading
 from pathlib import Path
 
 from dotenv import load_dotenv
-from telegram import ReplyKeyboardMarkup
+from telegram import KeyboardButton, ReplyKeyboardMarkup, WebAppInfo
 from telegram.error import TelegramError
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
+import anchor_server
+import anchor_session
 import config
 import garment_publish
 import normalize
@@ -27,11 +32,14 @@ PASSWORD = os.getenv("GARMENT_BOT_PASSWORD")
 # The categories are the buttons, so neither list can drift from the other.
 KEYBOARD = ReplyKeyboardMarkup([list(RIG_BY_CATEGORY)], resize_keyboard=True, one_time_keyboard=True)
 
+# A button's text is what comes back as a message, so the two live in one place.
+PUBLISH_AS_IS = "Publish as is"
+PLACE_POINTS = "Place points"
+
 # Per chat, not one global flag: the first person through must not unlock the
 # bot for everyone. It lives for the process, so a restart locks every chat.
 _unlocked = set()
 
-_pending = {}    # chat id -> normalized PNG bytes, waiting for a category
 _labels = None   # parser class names, or None on a machine with no GPU
 
 
@@ -66,6 +74,9 @@ def _run():
 
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", _on_start))
+    # Before the text handler: what the page sends is a message like any other,
+    # and only its update type tells it apart from someone typing.
+    app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, _on_anchors))
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, _on_image))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _on_text))
     app.run_polling(stop_signals=None)   # signal handlers only install on the main thread
@@ -80,7 +91,9 @@ async def _on_text(update, context):
     if update.effective_chat.id not in _unlocked:
         await _unlock(update, text)
     elif text in RIG_BY_CATEGORY:
-        await _publish(update, text)
+        await _offer(update, text)
+    elif text == PUBLISH_AS_IS:
+        await _publish_draft(update)
     else:
         await update.message.reply_text("Send a photo of a garment.")
 
@@ -125,7 +138,7 @@ async def _on_image(update, context):
     # Broad on purpose: these are arbitrary bytes off a phone, and an unhandled
     # error here would be logged and never answered - the user just waits.
     try:
-        _pending[update.effective_chat.id] = normalize.to_png(bytes(data))
+        anchor_session.park_photo(update.effective_chat.id, normalize.to_png(bytes(data)))
     except Exception as e:
         await message.reply_text(f"Couldn't read that as an image ({e}).")
         return
@@ -133,8 +146,11 @@ async def _on_image(update, context):
     await message.reply_text("What is it?", reply_markup=KEYBOARD)
 
 
-async def _publish(update, category):
-    png = _pending.pop(update.effective_chat.id, None)
+async def _offer(update, category):
+    """A category press: cut the garment out, draft its anchors, show them, and
+    offer whichever of the two ways on there is."""
+    chat_id = update.effective_chat.id
+    png = anchor_session.take_photo(chat_id)
     if png is None:
         await update.message.reply_text("Send a photo first.")
         return
@@ -143,7 +159,66 @@ async def _publish(update, category):
     # Seconds of numpy, run straight on this thread: it blocks the bot's own
     # loop and nothing else, since the render loop is a different thread.
     try:
-        reply = garment_publish.publish(png, category, _labels)
+        cutout, sidecar, trusted = garment_publish.prepare(png, category)
+        preview = anchor_session.render_preview(anchor_session.decode(cutout), sidecar)
+        token = anchor_session.new_session(chat_id, cutout, sidecar, category)
+    except Exception as e:
+        await update.message.reply_text(f"That one failed to build: {e}")
+        return
+
+    buttons = []
+    # Only a measured top is worth publishing unseen; everything else is a
+    # spread over the bounding box, and nobody wants that on the mirror.
+    if trusted:
+        buttons.append(KeyboardButton(PUBLISH_AS_IS))
+    if anchor_server.APP_URL:
+        buttons.append(KeyboardButton(PLACE_POINTS,
+                                      web_app=WebAppInfo(url=f"{anchor_server.APP_URL}/?t={token}")))
+    if not buttons:
+        anchor_session.end_session(chat_id)
+        if RIG_BY_CATEGORY[category] == "top":
+            await update.message.reply_text(
+                "couldn't find the shoulders - try a flatter photo against a plain background")
+        else:
+            await update.message.reply_text(f"{category} needs the anchor page, and ANCHOR_APP_URL is not set")
+        return
+
+    await update.message.reply_photo(
+        preview, caption="Here is where the points landed.",
+        reply_markup=ReplyKeyboardMarkup([buttons], resize_keyboard=True, one_time_keyboard=True))
+
+
+async def _publish_draft(update):
+    """Publish as is: the draft, exactly as the preview showed it."""
+    session = anchor_session.get_chat_session(update.effective_chat.id)
+    if session is None:
+        await update.message.reply_text("Send a photo first.")
+        return
+    await _build(update, session, session["sidecar"])
+
+
+async def _on_anchors(update, context):
+    """Save on the anchor page: Telegram delivers its JSON as an ordinary message."""
+    session = anchor_session.get_chat_session(update.effective_chat.id)
+    if session is None:
+        await update.message.reply_text("Send a photo first.")
+        return
+
+    try:
+        sidecar = anchor_session.validate(update.message.web_app_data.data, session["sidecar"],
+                                          session["category"], session["width"], session["height"])
+    except ValueError as e:
+        # The session outlives a bad save, so the same button opens the page again.
+        await update.message.reply_text(str(e))
+        return
+    await _build(update, session, sidecar)
+
+
+async def _build(update, session, sidecar):
+    """The half of the pipeline after the anchors, wherever they came from."""
+    try:
+        reply = garment_publish.finish(session["cutout"], sidecar, session["category"], _labels)
     except Exception as e:
         reply = f"That one failed to build: {e}"
+    anchor_session.end_session(update.effective_chat.id)
     await update.message.reply_text(reply)

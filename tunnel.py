@@ -24,7 +24,10 @@ import config
 # names when the request fails, and a looser pattern put it in the QR code.
 TUNNEL_URL = re.compile(r"https://(?!api\.)[a-z0-9-]+\.trycloudflare\.com")
 
-QR_PX = 120     # side of the code on the cropped frame
+# Side of the code on the 540 px-wide cropped frame. _render floors this to
+# whole pixels per module, so the steps are coarse: this lands on 2 px per
+# module, which the rig doubles to 4 when it scales the frame to the screen.
+QR_PX = 80
 MARGIN = 16     # from the frame's top-left corner
 
 _qr = None      # BGR array pasted on every frame; None until the tunnel is up

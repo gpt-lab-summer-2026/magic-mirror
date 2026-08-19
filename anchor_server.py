@@ -4,8 +4,8 @@ The phone's pages, served to whoever knows the password.
 Shaped like parser_thread.py: available() then start(), the thread owned here.
 It binds to localhost only - a tunnel is the one way in, so a laptop on the
 same lab Wi-Fi cannot reach it - and answers the password box, the mapping
-page, the two reads that page needs and the wear that puts the garment on the
-mirror. Nothing here builds a path out of anything a request said.
+page, the closet, the reads those two need, and the wear or the tap that puts a
+garment on the mirror. Nothing here builds a path out of anything a request said.
 
 Usage:
     python anchor_server.py garments/green_pants.png pants
@@ -26,6 +26,7 @@ from dotenv import load_dotenv
 
 import anchor_session
 import config
+import garment_library
 import garment_publish
 import normalize
 from garment_types import RIG_BY_CATEGORY
@@ -77,27 +78,36 @@ def _serve():
 
 class _Handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        route = urlparse(self.path).path
-        if route == "/":
+        route = urlparse(self.path)
+        if route.path == "/":
             self._send_page("index.html")
             return
         if not self._authorized():
             self._send_empty(403)
             return
-        if route == "/map":
+        if route.path == "/map":
             self._send_page("map.html")
             return
-        if route == "/categories":
+        if route.path == "/closet":
+            self._send_page("closet.html")
+            return
+        if route.path == "/categories":
             # The page holds no copy of this list, so a fourth category is one edit.
             self._send("application/json", json.dumps(list(RIG_BY_CATEGORY)).encode())
+            return
+        if route.path == "/closet.json":
+            self._send("application/json", json.dumps(_closet()).encode())
+            return
+        if route.path == "/thumb":
+            self._thumb(_garment_index(route.query))
             return
 
         session = anchor_session.get_session()
         if session is None:
             self._send_empty(404)
-        elif route == "/session":
+        elif route.path == "/session":
             self._send("application/json", json.dumps(_describe(session)).encode())
-        elif route == "/image":
+        elif route.path == "/image":
             self._send("image/png", session["cutout"])
         else:
             self._send_empty(404)
@@ -125,6 +135,9 @@ class _Handler(BaseHTTPRequestHandler):
         elif route.path == "/wear":
             with _lock:
                 self._wear(body)
+        elif route.path == "/pick":
+            with _lock:
+                self._pick(_garment_index(route.query))
         else:
             self._send_empty(404)
 
@@ -191,6 +204,22 @@ class _Handler(BaseHTTPRequestHandler):
             text, status = str(e), 400
         self._send_text(text, status)
 
+    def _thumb(self, i):
+        """The cutout as it sits on disk: a calibrated garment is at most 1600 px
+        and the phone scales it in one line of CSS. Downscale here only if slow."""
+        if i is None or garment_library.GARMENTS[i].path is None:
+            self._send_empty(404)
+            return
+        self._send("image/png", garment_library.GARMENTS[i].path.read_bytes())
+
+    def _pick(self, i):
+        """A tap on the closet, which is what the number keys do."""
+        if i is None:
+            self._send_empty(404)
+            return
+        garment_library.select(i)
+        self._send_text(f"{garment_library.GARMENTS[i].name} is up")
+
     def log_message(self, *args):
         """Silent: the render loop prints its frame timings to this same stdout,
         and a password must never reach a log even by accident."""
@@ -215,6 +244,23 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Length", "0")
         self.end_headers()
+
+
+def _garment_index(query):
+    """Which garment a request means. By index and never by a name it sent, so
+    nothing off the network becomes a path. None when there is none there."""
+    try:
+        i = int(parse_qs(query).get("i", [""])[0])
+    except ValueError:
+        return None
+    return i if 0 <= i < len(garment_library.GARMENTS) else None
+
+
+def _closet():
+    """The garments/ folder, as the page lists it. The live upload has no file
+    behind it, so it has no thumbnail and no place here."""
+    return [{"i": i, "name": garment.name}
+            for i, garment in enumerate(garment_library.GARMENTS) if garment.path is not None]
 
 
 def _describe(session):

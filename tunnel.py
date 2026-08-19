@@ -19,6 +19,11 @@ import qrcode
 
 import config
 
+# The tunnel's own hostname, and never the api.trycloudflare.com that
+# cloudflared posts to in order to ask for one - that is the host its error line
+# names when the request fails, and a looser pattern put it in the QR code.
+TUNNEL_URL = re.compile(r"https://(?!api\.)[a-z0-9-]+\.trycloudflare\.com")
+
 QR_PX = 120     # side of the code on the cropped frame
 MARGIN = 16     # from the frame's top-left corner
 
@@ -46,12 +51,17 @@ def _wait_for_url(process):
     it never does - which on the main thread would be main.py hanging before the
     window opens."""
     global _qr
+    last_line = ""
     for line in process.stderr:
-        found = re.search(r"https://\S+trycloudflare\.com", line)
+        found = TUNNEL_URL.search(line)
         if found:
             _qr = _render(found.group())
             print(f"anchor page: {found.group()}", flush=True)
             return
+        last_line = line.strip()
+    # stderr ended, so cloudflared is gone. Its last words are the only clue
+    # anyone gets: a blank corner where the QR code should be says nothing.
+    print(f"no tunnel, so no QR code: {last_line}", flush=True)
 
 
 def _render(url):

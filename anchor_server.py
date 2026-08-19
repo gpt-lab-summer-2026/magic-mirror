@@ -39,7 +39,7 @@ PASSWORD = os.getenv("GARMENT_BOT_PASSWORD")
 PAGE_DIR = Path(__file__).parent / "anchor_app"
 
 COOKIE = "mirror"
-MAX_BODY = 20 * 1024 * 1024   # a phone photo, with room to spare
+MAX_BODY = 10 * 1024 * 1024   # a phone photo, with room to spare
 
 _labels = None   # parser class names, for the occluder LUT finish() builds
 
@@ -113,7 +113,7 @@ class _Handler(BaseHTTPRequestHandler):
 
         length = int(self.headers.get("Content-Length", 0))
         if length > MAX_BODY:
-            self._send_text(f"that is over the {MAX_BODY // 1024 // 1024} MB cap", 413)
+            self._send_text("too large file size", 413)
             return
         body = self.rfile.read(length)
 
@@ -153,8 +153,10 @@ class _Handler(BaseHTTPRequestHandler):
     def _upload(self, category, body):
         """A photo, cut out and drafted, in place of whatever session was open.
 
-        Broad except: this is an arbitrary file off a phone, and every way it can
-        fail is one line back to whoever sent it rather than a wait with no reply.
+        A ValueError already carries a line written to be read - normalize.py
+        refusing the format or the size, or an empty cutout. Everything else is
+        an arbitrary file off a phone failing in some way nobody predicted, and
+        that still has to come back as a reply rather than as a silent wait.
         """
         if category not in RIG_BY_CATEGORY:
             self._send_text(f"no such category {category!r}", 400)
@@ -162,6 +164,9 @@ class _Handler(BaseHTTPRequestHandler):
 
         try:
             cutout, sidecar, _ = garment_publish.prepare(normalize.to_png(body), category)
+        except ValueError as e:
+            self._send_text(str(e), 400)
+            return
         except Exception as e:
             self._send_text(f"couldn't read that as a garment ({e})", 400)
             return

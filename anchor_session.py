@@ -9,7 +9,6 @@ it into place on the anchor page. The sessions live here rather than in
 telegram_bot.py because anchor_server.py has to reach the same ones.
 """
 import json
-import secrets
 import sys
 import tempfile
 from pathlib import Path
@@ -232,48 +231,45 @@ def validate(data: str, draft: dict, category: str, width: int, height: int) -> 
     return _sidecar(sent, names, segments, occluders)
 
 
-# One session per chat, the token inside it: a second upload replaces the whole
-# entry, so the token it held stops resolving the moment it is no longer current.
-_sessions = {}
+# One session, because there is one mirror: a second upload replaces the draft
+# the last one left, and whoever was looking at that one now sees this one.
+_session = None
+
+# Where a photo waits for its category - the bot asks for them one after the
+# other. The page sends both in the same request and never touches this.
+_parked_photo = None
 
 
 def park_photo(chat_id, png: bytes):
     """A photo arrives before its category, so it waits here for the button press."""
-    _sessions[chat_id] = {"photo": png}
+    global _parked_photo
+    _parked_photo = png
 
 
 def take_photo(chat_id):
     """The parked photo, once: a category press consumes it, so pressing a button
     twice asks for a photo again."""
-    session = _sessions.pop(chat_id, None)
-    return session.get("photo") if session else None
+    global _parked_photo
+    png, _parked_photo = _parked_photo, None
+    return png
 
 
-def new_session(chat_id, cutout: bytes, sidecar: dict, category: str) -> str:
-    """Park a draft for the anchor page and return the token that reaches it."""
+def new_session(chat_id, cutout: bytes, sidecar: dict, category: str):
+    """Park a draft for the anchor page, in place of whatever was open."""
+    global _session
     height, width = decode(cutout).shape[:2]
-    token = secrets.token_urlsafe(24)
-    _sessions[chat_id] = {"token": token, "cutout": cutout, "sidecar": sidecar,
-                          "category": category, "width": width, "height": height}
-    return token
+    _session = {"cutout": cutout, "sidecar": sidecar, "category": category,
+                "width": width, "height": height}
 
 
-def get_session(token: str):
-    """The session that token belongs to, or None - the server's whole lookup."""
-    for session in _sessions.values():
-        if session.get("token") == token:
-            return session
-    return None
-
-
-def get_chat_session(chat_id):
-    """The chat's open draft, or None - a photo waiting for a category is not one."""
-    session = _sessions.get(chat_id)
-    return session if session and "token" in session else None
+def get_session():
+    """The open draft, or None - the server's whole lookup."""
+    return _session
 
 
 def end_session(chat_id):
-    _sessions.pop(chat_id, None)
+    global _session
+    _session = None
 
 
 if __name__ == "__main__":

@@ -3,201 +3,45 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Place the points</title>
+<title>Magic mirror</title>
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
   body {
-    margin: 0; height: 100vh; display: flex; flex-direction: column;
+    margin: 0; height: 100vh; padding: 16px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
     font: 14px/1.4 system-ui, sans-serif;
     background: #17212b;
     color: #f5f5f5;
   }
-  #note, #statusLine { margin: 0; padding: 5px 10px; font-size: 12px; opacity: 0.75; }
-  main { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 0 8px; }
-  /* The checkerboard the preview photo is composited on, in CSS - the cutout is
-     transparent, and a garment edge over a flat colour is impossible to judge. */
-  canvas {
-    display: block; touch-action: none;
-    background-color: #3c3c3c;
-    background-image: linear-gradient(45deg, #5a5a5a 25%, transparent 25%, transparent 75%, #5a5a5a 75%),
-                      linear-gradient(45deg, #5a5a5a 25%, transparent 25%, transparent 75%, #5a5a5a 75%);
-    background-size: 32px 32px;
-    background-position: 0 0, 16px 16px;
+  input, button {
+    width: 100%; max-width: 320px; padding: 11px; border: 0; border-radius: 8px; font: inherit;
   }
-  footer { display: flex; gap: 8px; padding: 8px; }
-  footer button {
-    flex: 1; padding: 11px; border: 0; border-radius: 8px; font: inherit;
-    background: #2ea6ff;
-    color: #ffffff;
-  }
-  footer button:disabled { opacity: 0.4; }
+  button { background: #2ea6ff; color: #ffffff; }
+  #statusLine { margin: 0; min-height: 1.4em; font-size: 12px; opacity: 0.75; }
 </style>
 </head>
 <body>
-<p id="note">Left and right are the wearer's, not the screen's: the left points sit on the image's right.</p>
-<main><canvas id="canvas"></canvas></main>
+<input id="password" type="password" autocomplete="current-password" placeholder="password" autofocus>
+<button id="enter">Enter</button>
 <p id="statusLine"></p>
-<footer>
-  <button id="undo">Undo</button>
-  <button id="wear">Wear garment</button>
-</footer>
 
 <script>
-// The page is only ever opened as .../?t=<token>, and that token is the whole
-// of its access to the mirror: one draft, one cutout, for as long as the
-// upload it belongs to is still open.
-const token = new URLSearchParams(location.search).get("t") || "";
-
-const canvas = document.getElementById("canvas");
-const context = canvas.getContext("2d");
+const password = document.getElementById("password");
 const statusLine = document.getElementById("statusLine");
-const wear = document.getElementById("wear");
 
-let session = null;     // what /session sent: point names, core count, size, colours
-let image = null;       // the cutout itself
-let points = [];        // [x, y] in image pixels, in point_names order - calibrate.py's list
-let dragging = false;   // the point just placed, still under the finger
-let scale = 1;          // image pixels -> CSS pixels
-
-
-async function load() {
-  const answer = await fetch("/session?t=" + encodeURIComponent(token));
-  if (!answer.ok) throw new Error("this page has expired - send the photo again");
-  session = await answer.json();
-
-  image = new Image();
-  await new Promise((resolve, reject) => {
-    image.onload = resolve;
-    image.onerror = () => reject(new Error("the cutout would not load - send the photo again"));
-    image.src = "/image?t=" + encodeURIComponent(token);
-  });
-
-  layout();
+// In the body, never in the URL: a query string ends up in the phone's history
+// and in every log between here and there. The reply sets the cookie that every
+// other page and request is checked against, and this is the only time the
+// password is sent at all.
+async function login() {
+  const response = await fetch("/login", { method: "POST", body: password.value });
+  if (response.ok) location = "/map";
+  else statusLine.textContent = "wrong password";
 }
 
-
-// --- the two coordinate spaces ---
-
-function clamp(x, y) {
-  // The canvas is the image scaled, so a tap on its last row rounds one pixel
-  // past the edge. Whole pixels, because that is what gets saved.
-  return [Math.min(Math.max(Math.round(x), 0), session.width - 1),
-          Math.min(Math.max(Math.round(y), 0), session.height - 1)];
-}
-
-function toCanvas(point) {
-  return [point[0] * scale, point[1] * scale];
-}
-
-function colorOf(i) {
-  return session.colors[i % session.colors.length];
-}
-
-
-// --- drawing ---
-
-function layout() {
-  const ratio = window.devicePixelRatio || 1;
-  const stage = canvas.parentElement;
-  scale = Math.min(stage.clientWidth / session.width, stage.clientHeight / session.height);
-  canvas.style.width = session.width * scale + "px";
-  canvas.style.height = session.height * scale + "px";
-  canvas.width = Math.round(session.width * scale * ratio);
-  canvas.height = Math.round(session.height * scale * ratio);
-  context.setTransform(ratio, 0, 0, ratio, 0, 0);   // so everything below is drawn in CSS pixels
-  refresh();
-}
-
-function refresh() {
-  const next = session.point_names[points.length];
-  statusLine.textContent = next
-    ? "tap: " + next + (points.length < session.core ? "" : " (optional)")
-    : "all points set";
-  wear.disabled = points.length < session.core;
-  draw();
-}
-
-function draw() {
-  const width = session.width * scale, height = session.height * scale;
-  context.clearRect(0, 0, width, height);
-  context.drawImage(image, 0, 0, width, height);
-  context.font = "12px system-ui, sans-serif";
-  points.forEach((point, i) => {
-    const [x, y] = toCanvas(point);
-    const name = session.point_names[i];
-    context.fillStyle = colorOf(i);
-    context.strokeStyle = "#000000";
-    context.beginPath();
-    context.arc(x, y, 7, 0, 2 * Math.PI);
-    context.fill();
-    context.lineWidth = 2;
-    context.stroke();
-    // A label that would run off the canvas goes to the dot's left and a line
-    // lower instead, clear of whatever label its neighbour is already wearing.
-    // Every bottom keeps its wearer's-left points against the right edge, so
-    // this is the common case, not the corner one.
-    const label = context.measureText(name).width;
-    const fits = x + 11 + label < width;
-    const labelX = fits ? x + 11 : x - 11 - label;
-    const labelY = fits ? y - 9 : y + 17;
-    context.lineWidth = 3;
-    context.strokeText(name, labelX, labelY);
-    context.fillText(name, labelX, labelY);
-  });
-}
-
-
-// --- input: a tap places the next point, and it follows the finger until it lifts ---
-
-function pointerAt(event) {
-  const rect = canvas.getBoundingClientRect();
-  return [event.clientX - rect.left, event.clientY - rect.top];
-}
-
-canvas.addEventListener("pointerdown", event => {
-  if (points.length === session.point_names.length) return;   // calibrate.py's on_mouse
-  const [x, y] = pointerAt(event);
-  points.push(clamp(x / scale, y / scale));
-  dragging = true;
-  canvas.setPointerCapture(event.pointerId);
-  refresh();
-});
-
-// The one thing calibrate.py has no need of: a mouse click is a pixel, a
-// fingertip is ~10 px and covers the very seam it is aiming at.
-canvas.addEventListener("pointermove", event => {
-  if (!dragging) return;
-  const [x, y] = pointerAt(event);
-  points[points.length - 1] = clamp(x / scale, y / scale);
-  refresh();
-});
-
-canvas.addEventListener("pointerup", () => { dragging = false; });
-canvas.addEventListener("pointercancel", () => { dragging = false; });
-
-
-// --- the two buttons ---
-
-document.getElementById("undo").addEventListener("click", () => {
-  points.pop();
-  refresh();
-});
-
-// Whatever is placed so far: pressing early is calibrate.py's "press s early",
-// and validate() turns a top with no sleeve points into a sleeveless one.
-wear.addEventListener("click", async () => {
-  const anchors = {};
-  points.forEach((point, i) => { anchors[session.point_names[i]] = point; });
-  const response = await fetch("/wear?t=" + encodeURIComponent(token), {
-    method: "POST", body: JSON.stringify(anchors)
-  });
-  statusLine.textContent = await response.text();
-});
-
-
-window.addEventListener("resize", () => { if (session) layout(); });
-load().catch(error => { statusLine.textContent = error.message; });
+document.getElementById("enter").addEventListener("click", login);
+password.addEventListener("keydown", event => { if (event.key === "Enter") login(); });
 </script>
 </body>
 </html>

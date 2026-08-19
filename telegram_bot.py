@@ -161,7 +161,7 @@ async def _offer(update, category):
     try:
         cutout, sidecar, trusted = garment_publish.prepare(png, category)
         preview = anchor_session.render_preview(anchor_session.decode(cutout), sidecar)
-        token = anchor_session.new_session(chat_id, cutout, sidecar, category)
+        anchor_session.new_session(chat_id, cutout, sidecar, category)
     except Exception as e:
         await update.message.reply_text(f"That one failed to build: {e}")
         return
@@ -172,8 +172,9 @@ async def _offer(update, category):
     if trusted:
         buttons.append(KeyboardButton(PUBLISH_AS_IS))
     if anchor_server.APP_URL:
-        buttons.append(KeyboardButton(PLACE_POINTS,
-                                      web_app=WebAppInfo(url=f"{anchor_server.APP_URL}/?t={token}")))
+        # No token in the URL any more: the page asks for the password and
+        # then opens on the one session, which is the one just parked here.
+        buttons.append(KeyboardButton(PLACE_POINTS, web_app=WebAppInfo(url=anchor_server.APP_URL)))
     if not buttons:
         anchor_session.end_session(chat_id)
         if RIG_BY_CATEGORY[category] == "top":
@@ -190,7 +191,7 @@ async def _offer(update, category):
 
 async def _publish_draft(update):
     """Publish as is: the draft, exactly as the preview showed it."""
-    session = anchor_session.get_chat_session(update.effective_chat.id)
+    session = anchor_session.get_session()
     if session is None:
         await update.message.reply_text("Send a photo first.")
         return
@@ -199,7 +200,7 @@ async def _publish_draft(update):
 
 async def _on_anchors(update, context):
     """Save on the anchor page: Telegram delivers its JSON as an ordinary message."""
-    session = anchor_session.get_chat_session(update.effective_chat.id)
+    session = anchor_session.get_session()
     if session is None:
         await update.message.reply_text("Send a photo first.")
         return

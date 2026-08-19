@@ -312,18 +312,13 @@ document.getElementById("undo").addEventListener("click", () => {
 
 document.getElementById("reset").addEventListener("click", () => reset());
 
-document.getElementById("save").addEventListener("click", () => {
+document.getElementById("save").addEventListener("click", async () => {
   const anchorsToSave = {};
   for (const name of placed()) anchorsToSave[name] = anchors[name];
-  const json = JSON.stringify(anchorsToSave);
-  if (inTelegram) {
-    telegram.sendData(json);
-    telegram.close();
-  } else {
-    // Nowhere to send it from a desktop browser, so show what would have gone.
-    console.log(json);
-    alert(json);
-  }
+  const response = await fetch("/wear?t=" + encodeURIComponent(token), {
+    method: "POST", body: JSON.stringify(anchorsToSave)
+  });
+  statusLine.textContent = await response.text();
 });
 
 

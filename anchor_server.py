@@ -3,9 +3,9 @@ The anchor page, served to one phone.
 
 Shaped like telegram_bot.py: available() then start(), the thread owned here.
 It binds to localhost only - a tunnel is the one way in, so a laptop on the
-same lab Wi-Fi cannot reach it - and answers three requests and no others: the
-page, and two reads that a live session's token unlocks. Nothing here builds a
-path out of anything a request said, and nothing here writes.
+same lab Wi-Fi cannot reach it - and answers four requests and no others: the
+page, two reads that a live session's token unlocks, and the wear that puts the
+garment on the mirror. Nothing here builds a path out of anything a request said.
 
 Usage:
     python anchor_server.py garments/green_pants.png pants
@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 
 import anchor_session
 import config
+import garment_publish
 from garment_types import RIG_BY_CATEGORY
 
 load_dotenv()
@@ -31,15 +32,24 @@ APP_URL = os.getenv("ANCHOR_APP_URL")
 
 PAGE = Path(__file__).parent / "anchor_app" / "index.html"
 
+_labels = None   # parser class names, for the occluder LUT finish() builds
+
+# One request at a time changes the mirror's state. Until now the bot's single
+# event loop made that true by accident; ThreadingHTTPServer gives every request
+# its own thread, so two presses could both build a garment at once.
+_lock = threading.Lock()
+
 
 def available():
     """No tunnel URL means no page worth serving - the bot then never offers it."""
     return bool(APP_URL)
 
 
-def start():
+def start(labels):
     """Serve on a daemon thread, for telegram_bot.py's reason: `q` has to end the
     process even with a page open, and an unsaved draft is nothing to protect."""
+    global _labels
+    _labels = labels
     threading.Thread(target=_serve, daemon=True).start()
 
 
@@ -64,11 +74,34 @@ class _Handler(BaseHTTPRequestHandler):
         else:
             self._send_404()
 
+    def do_POST(self):
+        route = urlparse(self.path)
+        session = anchor_session.get_session(parse_qs(route.query).get("t", [""])[0])
+        if route.path != "/wear" or session is None:
+            self._send_404()
+            return
+
+        body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        with _lock:
+            self._wear(session, body)
+
+    def _wear(self, session, body):
+        """The anchors the page ended up with, onto the mirror. A bad point is 400
+        and the session lives on - fix it, press again."""
+        try:
+            sidecar = anchor_session.validate(body.decode(), session["sidecar"],
+                                              session["category"], session["width"], session["height"])
+            text, status = garment_publish.finish(session["cutout"], sidecar,
+                                                  session["category"], _labels), 200
+        except ValueError as e:
+            text, status = str(e), 400
+        self._send("text/plain; charset=utf-8", text.encode(), status)
+
     def log_message(self, *args):
         """Silent: the render loop prints its frame timings to this same stdout."""
 
-    def _send(self, content_type, body):
-        self.send_response(200)
+    def _send(self, content_type, body, status=200):
+        self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()

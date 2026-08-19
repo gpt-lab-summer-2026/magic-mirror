@@ -64,7 +64,7 @@ if telegram_bot.available():
     telegram_bot.start(labels)
 
 if anchor_server.available():
-    anchor_server.start()
+    anchor_server.start(labels)
 
 smoother = garment_rig.LandmarkSmoother(alpha=0.4)
 frame_ms = 1000 / config.CAPTURE_FPS   # smoothed; the raw per-frame number is unreadable jitter

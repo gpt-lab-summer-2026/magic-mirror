@@ -39,37 +39,40 @@
 </style>
 </head>
 <body>
-<nav><a href="/map">New photo</a></nav>
-<div id="rack"></div>
-<p id="statusLine"></p>
+  <nav>
+    <h1> &#11090; Magic Mirror &#11090; </h1>
+    <a href="/map">New photo</a>
+  </nav>
+  <div id="rack"></div>
+  <p id="statusLine"></p>
 
-<script>
-const rack = document.getElementById("rack");
-const statusLine = document.getElementById("statusLine");
+  <script>
+  const rack = document.getElementById("rack");
+  const statusLine = document.getElementById("statusLine");
 
-async function load() {
-  const answer = await fetch("/closet.json");
-  if (answer.status === 403) { location = "/"; return; }   // the cookie is gone: log in again
-  for (const garment of await answer.json()) {
-    const image = document.createElement("img");
-    image.src = "/thumb?i=" + garment.i;
-    const caption = document.createElement("figcaption");
-    caption.textContent = garment.name;   // textContent, never innerHTML, for anything the server says
-    const figure = document.createElement("figure");
-    figure.append(image, caption);
-    figure.addEventListener("click", () => wear(garment.i));
-    rack.appendChild(figure);
+  async function load() {
+    const answer = await fetch("/closet.json");
+    if (answer.status === 403) { location = "/"; return; }   // the cookie is gone: log in again
+    for (const garment of await answer.json()) {
+      const image = document.createElement("img");
+      image.src = "/thumb?i=" + garment.i;
+      const caption = document.createElement("figcaption");
+      caption.textContent = garment.name;   // textContent, never innerHTML, for anything the server says
+      const figure = document.createElement("figure");
+      figure.append(image, caption);
+      figure.addEventListener("click", () => wear(garment.i));
+      rack.appendChild(figure);
+    }
   }
-}
 
-// The index the list came with, never the name under it: the server looks up a
-// garment by position and so has no name off the network to turn into a path.
-async function wear(i) {
-  const response = await fetch("/pick?i=" + i, { method: "POST" });
-  statusLine.textContent = await response.text();
-}
+  // The index the list came with, never the name under it: the server looks up a
+  // garment by position and so has no name off the network to turn into a path.
+  async function wear(i) {
+    const response = await fetch("/pick?i=" + i, { method: "POST" });
+    statusLine.textContent = await response.text();
+  }
 
-load().catch(error => { statusLine.textContent = error.message; });
-</script>
+  load().catch(error => { statusLine.textContent = error.message; });
+  </script>
 </body>
 </html>

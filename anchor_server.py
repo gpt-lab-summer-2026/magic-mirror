@@ -2,8 +2,8 @@
 The phone's pages, served to whoever knows the password.
 
 Shaped like parser_thread.py: available() then start(), the thread owned here.
-It binds to localhost only - a tunnel is the one way in, so a laptop on the
-same lab Wi-Fi cannot reach it - and answers the password box, the mapping
+Binds to localhost only - a tunnel is the one way in, so a laptop on the
+same lab Wi-Fi cannot reach it. It answers the password box, the mapping
 page, the closet, the reads those two need, and the wear or the tap that puts a
 garment on the mirror. Nothing here builds a path out of anything a request said.
 
@@ -120,7 +120,7 @@ class _Handler(BaseHTTPRequestHandler):
 
         length = int(self.headers.get("Content-Length", 0))
         if length > MAX_BODY:
-            self._send_text("too large file size", 413)
+            self._send_text("The file size is too large", 413)
             return
         body = self.rfile.read(length)
 
@@ -244,8 +244,8 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 def _garment_index(query):
-    """Which garment a request means. By index and never by a name it sent, so
-    nothing off the network becomes a path. None when there is none there."""
+    """Which garment a request means. By index, never by a name, so
+    nothing off the network becomes a path. None when there is none."""
     try:
         i = int(parse_qs(query).get("i", [""])[0])
     except ValueError:
@@ -261,7 +261,7 @@ def _closet():
 
 
 def _describe(session):
-    """Everything the page draws, so it carries no copy of the point names itself."""
+    """Everything the page draws, carries no copy of the point names itself."""
     point_names, core = anchor_session.points_for(session["category"])
     return {
         "point_names": point_names,

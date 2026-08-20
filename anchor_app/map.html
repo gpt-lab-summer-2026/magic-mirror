@@ -16,7 +16,7 @@
     background: #17212b;
     color: #f5f5f5;
   }
-  #note, #statusLine { margin: 0; padding: 5px 10px; font-size: 12px; opacity: 0.75; }
+  #note, #statusLine { margin: 0; padding: 5px 10px; font-size: 16px; opacity: 0.75; }
   nav { padding: 8px 8px 0; }
   nav a {
     display: block; padding: 11px; border-radius: 8px; text-align: center; text-decoration: none;
@@ -48,209 +48,213 @@
 </style>
 </head>
 <body>
-<nav><a href="/closet">Closet</a></nav>
-<p id="note">Left and right are the wearer's, not the screen's: the left points sit on the image's right.</p>
-<main id="stage"><canvas id="canvas"></canvas></main>
-<section id="intake" hidden>
-  <input id="photo" type="file" accept="image/*">
-  <div id="categories"></div>
-</section>
-<p id="statusLine"></p>
-<footer id="tools">
-  <button id="newPhoto">New photo</button>
-  <button id="undo">Undo</button>
-  <button id="wear">Wear garment</button>
-</footer>
+  <nav><a href="/closet">Example garments</a></nav>
+  <p id="note">Place the left points on the image's right &#8594; <br> 
+    and right points on the image's left &#8592;
+  </p>
+  <br>
+  <main id="stage"><canvas id="canvas"></canvas></main>
+  <section id="intake" hidden>
+    <input id="photo" type="file" accept="image/*">
+    <div id="categories"></div>
+  </section>
+  <br>
+  <p id="statusLine"></p>
+  <footer id="tools">
+    <button id="newPhoto">New photo</button>
+    <button id="undo">Undo</button>
+    <button id="wear">Wear garment</button>
+  </footer>
 
-<script>
-const canvas = document.getElementById("canvas");
-const context = canvas.getContext("2d");
-const statusLine = document.getElementById("statusLine");
-const wear = document.getElementById("wear");
-const note = document.getElementById("note");
-const stage = document.getElementById("stage");
-const tools = document.getElementById("tools");
-const intake = document.getElementById("intake");
-const photo = document.getElementById("photo");
+  <script>
+  const canvas = document.getElementById("canvas");
+  const context = canvas.getContext("2d");
+  const statusLine = document.getElementById("statusLine");
+  const wear = document.getElementById("wear");
+  const note = document.getElementById("note");
+  const stage = document.getElementById("stage");
+  const tools = document.getElementById("tools");
+  const intake = document.getElementById("intake");
+  const photo = document.getElementById("photo");
 
-let session = null;     // what /session sent: point names, core count, size, colours
-let image = null;       // the cutout itself
-let points = [];        // [x, y] in image pixels, in point_names order - calibrate.py's list
-let dragging = false;   // the point just placed, still under the finger
-let scale = 1;          // image pixels -> CSS pixels
-
-
-async function load() {
-  const answer = await fetch("/session");
-  if (answer.status === 403) { location = "/"; return; }   // the cookie is gone: log in again
-  await buildCategories();
-  if (!answer.ok) { showIntake(); return; }                // nothing uploaded yet
-  session = await answer.json();
-
-  image = new Image();
-  await new Promise((resolve, reject) => {
-    image.onload = resolve;
-    image.onerror = () => reject(new Error("the cutout would not load - send the photo again"));
-    image.src = "/image";
-  });
-
-  layout();
-}
+  let session = null;     // what /session sent: point names, core count, size, colours
+  let image = null;       // the cutout itself
+  let points = [];        // [x, y] in image pixels, in point_names order - calibrate.py's list
+  let dragging = false;   // the point just placed, still under the finger
+  let scale = 1;          // image pixels -> CSS pixels
 
 
-// --- intake: a photo, and what it is ---
+  async function load() {
+    const answer = await fetch("/session");
+    if (answer.status === 403) { location = "/"; return; }   // the cookie is gone: log in again
+    await buildCategories();
+    if (!answer.ok) { showIntake(); return; }                // nothing uploaded yet
+    session = await answer.json();
 
-async function buildCategories() {
-  // The list comes from the server, so the page holds no copy of it. textContent
-  // and not innerHTML, for everything the server says, as a habit.
-  for (const category of await (await fetch("/categories")).json()) {
-    const button = document.createElement("button");
-    button.textContent = category;
-    button.addEventListener("click", () => upload(category));
-    document.getElementById("categories").appendChild(button);
+    image = new Image();
+    await new Promise((resolve, reject) => {
+      image.onload = resolve;
+      image.onerror = () => reject(new Error("the cutout would not load - send the photo again"));
+      image.src = "/image";
+    });
+
+    layout();
   }
-}
-
-function showIntake() {
-  intake.hidden = false;
-  note.hidden = stage.hidden = tools.hidden = true;
-}
-
-async function upload(category) {
-  if (!photo.files.length) { statusLine.textContent = "pick a photo first"; return; }
-  statusLine.textContent = "working on the " + category + "...";
-  // The file's own bytes and nothing wrapped round them: http.server has no
-  // multipart parser, and sent this way it needs none.
-  const response = await fetch("/upload?category=" + category,
-                               { method: "POST", body: photo.files[0] });
-  if (response.ok) location.reload();
-  else statusLine.textContent = await response.text();
-}
 
 
-// --- the two coordinate spaces ---
+  // --- intake: a photo, and what it is ---
 
-function clamp(x, y) {
-  // The canvas is the image scaled, so a tap on its last row rounds one pixel
-  // past the edge. Whole pixels, because that is what gets saved.
-  return [Math.min(Math.max(Math.round(x), 0), session.width - 1),
-          Math.min(Math.max(Math.round(y), 0), session.height - 1)];
-}
+  async function buildCategories() {
+    // The list comes from the server, so the page holds no copy of it. textContent
+    // and not innerHTML, for everything the server says, as a habit.
+    for (const category of await (await fetch("/categories")).json()) {
+      const button = document.createElement("button");
+      button.textContent = category;
+      button.addEventListener("click", () => upload(category));
+      document.getElementById("categories").appendChild(button);
+    }
+  }
 
-function toCanvas(point) {
-  return [point[0] * scale, point[1] * scale];
-}
+  function showIntake() {
+    intake.hidden = false;
+    note.hidden = stage.hidden = tools.hidden = true;
+  }
 
-function colorOf(i) {
-  return session.colors[i % session.colors.length];
-}
+  async function upload(category) {
+    if (!photo.files.length) { statusLine.textContent = "pick a photo first"; return; }
+    statusLine.textContent = "working on the " + category + "...";
+    // The file's own bytes and nothing wrapped round them: http.server has no
+    // multipart parser, and sent this way it needs none.
+    const response = await fetch("/upload?category=" + category,
+                                { method: "POST", body: photo.files[0] });
+    if (response.ok) location.reload();
+    else statusLine.textContent = await response.text();
+  }
 
 
-// --- drawing ---
+  // --- the two coordinate spaces ---
 
-function layout() {
-  const ratio = window.devicePixelRatio || 1;
-  const stage = canvas.parentElement;
-  scale = Math.min(stage.clientWidth / session.width, stage.clientHeight / session.height);
-  canvas.style.width = session.width * scale + "px";
-  canvas.style.height = session.height * scale + "px";
-  canvas.width = Math.round(session.width * scale * ratio);
-  canvas.height = Math.round(session.height * scale * ratio);
-  context.setTransform(ratio, 0, 0, ratio, 0, 0);   // so everything below is drawn in CSS pixels
-  refresh();
-}
+  function clamp(x, y) {
+    // The canvas is the image scaled, so a tap on its last row rounds one pixel
+    // past the edge. Whole pixels, because that is what gets saved.
+    return [Math.min(Math.max(Math.round(x), 0), session.width - 1),
+            Math.min(Math.max(Math.round(y), 0), session.height - 1)];
+  }
 
-function refresh() {
-  const next = session.point_names[points.length];
-  statusLine.textContent = next
-    ? "tap: " + next + (points.length < session.core ? "" : " (optional)")
-    : "all points set";
-  wear.disabled = points.length < session.core;
-  draw();
-}
+  function toCanvas(point) {
+    return [point[0] * scale, point[1] * scale];
+  }
 
-function draw() {
-  const width = session.width * scale, height = session.height * scale;
-  context.clearRect(0, 0, width, height);
-  context.drawImage(image, 0, 0, width, height);
-  context.font = "12px system-ui, sans-serif";
-  points.forEach((point, i) => {
-    const [x, y] = toCanvas(point);
-    const name = session.point_names[i];
-    context.fillStyle = colorOf(i);
-    context.strokeStyle = "#000000";
-    context.beginPath();
-    context.arc(x, y, 7, 0, 2 * Math.PI);
-    context.fill();
-    context.lineWidth = 2;
-    context.stroke();
-    // A label that would run off the canvas goes to the dot's left and a line
-    // lower instead, clear of whatever label its neighbour is already wearing.
-    // Every bottom keeps its wearer's-left points against the right edge, so
-    // this is the common case, not the corner one.
-    const label = context.measureText(name).width;
-    const fits = x + 11 + label < width;
-    const labelX = fits ? x + 11 : x - 11 - label;
-    const labelY = fits ? y - 9 : y + 17;
-    context.lineWidth = 3;
-    context.strokeText(name, labelX, labelY);
-    context.fillText(name, labelX, labelY);
+  function colorOf(i) {
+    return session.colors[i % session.colors.length];
+  }
+
+
+  // --- drawing ---
+
+  function layout() {
+    const ratio = window.devicePixelRatio || 1;
+    const stage = canvas.parentElement;
+    scale = Math.min(stage.clientWidth / session.width, stage.clientHeight / session.height);
+    canvas.style.width = session.width * scale + "px";
+    canvas.style.height = session.height * scale + "px";
+    canvas.width = Math.round(session.width * scale * ratio);
+    canvas.height = Math.round(session.height * scale * ratio);
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);   // so everything below is drawn in CSS pixels
+    refresh();
+  }
+
+  function refresh() {
+    const next = session.point_names[points.length];
+    statusLine.textContent = next
+      ? "tap: " + next + (points.length < session.core ? "" : " (optional)")
+      : "all points set";
+    wear.disabled = points.length < session.core;
+    draw();
+  }
+
+  function draw() {
+    const width = session.width * scale, height = session.height * scale;
+    context.clearRect(0, 0, width, height);
+    context.drawImage(image, 0, 0, width, height);
+    context.font = "16px system-ui, sans-serif";
+    points.forEach((point, i) => {
+      const [x, y] = toCanvas(point);
+      const name = session.point_names[i];
+      context.fillStyle = colorOf(i);
+      context.strokeStyle = "#000000";
+      context.beginPath();
+      context.arc(x, y, 7, 0, 2 * Math.PI);
+      context.fill();
+      context.lineWidth = 2;
+      context.stroke();
+      // A label that would run off the canvas goes to the dot's left and a line
+      // lower instead, clear of whatever label its neighbour is already wearing.
+      // Every bottom keeps its wearer's-left points against the right edge, so
+      // this is the common case, not the corner one.
+      const label = context.measureText(name).width;
+      const fits = x + 11 + label < width;
+      const labelX = fits ? x + 11 : x - 11 - label;
+      const labelY = fits ? y - 9 : y + 17;
+      context.lineWidth = 3;
+      context.strokeText(name, labelX, labelY);
+      context.fillText(name, labelX, labelY);
+    });
+  }
+
+
+  // --- input: a tap places the next point, and it follows the finger until it lifts ---
+
+  function pointerAt(event) {
+    const rect = canvas.getBoundingClientRect();
+    return [event.clientX - rect.left, event.clientY - rect.top];
+  }
+
+  canvas.addEventListener("pointerdown", event => {
+    if (points.length === session.point_names.length) return;   // calibrate.py's on_mouse
+    const [x, y] = pointerAt(event);
+    points.push(clamp(x / scale, y / scale));
+    dragging = true;
+    canvas.setPointerCapture(event.pointerId);
+    refresh();
   });
-}
 
-
-// --- input: a tap places the next point, and it follows the finger until it lifts ---
-
-function pointerAt(event) {
-  const rect = canvas.getBoundingClientRect();
-  return [event.clientX - rect.left, event.clientY - rect.top];
-}
-
-canvas.addEventListener("pointerdown", event => {
-  if (points.length === session.point_names.length) return;   // calibrate.py's on_mouse
-  const [x, y] = pointerAt(event);
-  points.push(clamp(x / scale, y / scale));
-  dragging = true;
-  canvas.setPointerCapture(event.pointerId);
-  refresh();
-});
-
-// The one thing calibrate.py has no need of: a mouse click is a pixel, a
-// fingertip is ~10 px and covers the very seam it is aiming at.
-canvas.addEventListener("pointermove", event => {
-  if (!dragging) return;
-  const [x, y] = pointerAt(event);
-  points[points.length - 1] = clamp(x / scale, y / scale);
-  refresh();
-});
-
-canvas.addEventListener("pointerup", () => { dragging = false; });
-canvas.addEventListener("pointercancel", () => { dragging = false; });
-
-
-// --- the two buttons ---
-
-document.getElementById("newPhoto").addEventListener("click", showIntake);
-
-document.getElementById("undo").addEventListener("click", () => {
-  points.pop();
-  refresh();
-});
-
-// Whatever is placed so far: pressing early is calibrate.py's "press s early",
-// and validate() turns a top with no sleeve points into a sleeveless one.
-wear.addEventListener("click", async () => {
-  const anchors = {};
-  points.forEach((point, i) => { anchors[session.point_names[i]] = point; });
-  const response = await fetch("/wear", {
-    method: "POST", body: JSON.stringify(anchors)
+  // The one thing calibrate.py has no need of: a mouse click is a pixel, a
+  // fingertip is ~10 px and covers the very seam it is aiming at.
+  canvas.addEventListener("pointermove", event => {
+    if (!dragging) return;
+    const [x, y] = pointerAt(event);
+    points[points.length - 1] = clamp(x / scale, y / scale);
+    refresh();
   });
-  statusLine.textContent = await response.text();
-});
+
+  canvas.addEventListener("pointerup", () => { dragging = false; });
+  canvas.addEventListener("pointercancel", () => { dragging = false; });
 
 
-window.addEventListener("resize", () => { if (session && !stage.hidden) layout(); });
-load().catch(error => { statusLine.textContent = error.message; });
-</script>
+  // --- the two buttons ---
+
+  document.getElementById("newPhoto").addEventListener("click", showIntake);
+
+  document.getElementById("undo").addEventListener("click", () => {
+    points.pop();
+    refresh();
+  });
+
+  // Whatever is placed so far: pressing early is calibrate.py's "press s early",
+  // and validate() turns a top with no sleeve points into a sleeveless one.
+  wear.addEventListener("click", async () => {
+    const anchors = {};
+    points.forEach((point, i) => { anchors[session.point_names[i]] = point; });
+    const response = await fetch("/wear", {
+      method: "POST", body: JSON.stringify(anchors)
+    });
+    statusLine.textContent = await response.text();
+  });
+
+
+  window.addEventListener("resize", () => { if (session && !stage.hidden) layout(); });
+  load().catch(error => { statusLine.textContent = error.message; });
+  </script>
 </body>
 </html>

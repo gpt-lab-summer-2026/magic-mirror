@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Closet</title>
 <style>
-  :root { color-scheme: dark; }
+  :root { color-scheme: light dark; }
   * { box-sizing: border-box; }
   body {
     /* dvh first, vh for the browsers that don't know it. The page fits the
@@ -13,15 +13,15 @@
     margin: 0; height: 100vh; height: 100dvh; overflow: hidden;
     display: flex; flex-direction: column;
     font: 14px/1.4 system-ui, sans-serif;
-    background: #17212b;
-    color: #f5f5f5;
+    background-color: light-dark(#ffc9ed, #17212b);
+    color: light-dark(#6b1a50, #f5f5f5);
   }
   #statusLine { margin: 0; padding: 5px 10px; font-size: 12px; opacity: 0.75; }
   nav { padding: 8px 8px 0; }
   nav a {
     display: block; padding: 11px; border-radius: 8px; text-align: center; text-decoration: none;
-    background: #24384a;
-    color: #f5f5f5;
+    background-color: light-dark(#f5f5f5, #24384a);
+    color: light-dark(#6b1a50, #f5f5f5);
   }
   #rack {
     flex: 1; min-height: 0; overflow-y: auto;
@@ -33,43 +33,46 @@
   img {
     display: block; width: 100%; height: 150px; object-fit: contain;
     border-radius: 8px;
-    background: #3c3c3c;
+    background-color: light-dark(#f5f5f5, #3c3c3c);
   }
   figcaption { padding-top: 4px; text-align: center; }
 </style>
 </head>
 <body>
-<nav><a href="/map">New photo</a></nav>
-<div id="rack"></div>
-<p id="statusLine"></p>
+  <nav>
+    <h1> &#11090; Magic Mirror &#11090; </h1>
+    <a href="/map">Upload new garment</a>
+  </nav>
+  <div id="rack"></div>
+  <p id="statusLine"></p>
 
-<script>
-const rack = document.getElementById("rack");
-const statusLine = document.getElementById("statusLine");
+  <script>
+  const rack = document.getElementById("rack");
+  const statusLine = document.getElementById("statusLine");
 
-async function load() {
-  const answer = await fetch("/closet.json");
-  if (answer.status === 403) { location = "/"; return; }   // the cookie is gone: log in again
-  for (const garment of await answer.json()) {
-    const image = document.createElement("img");
-    image.src = "/thumb?i=" + garment.i;
-    const caption = document.createElement("figcaption");
-    caption.textContent = garment.name;   // textContent, never innerHTML, for anything the server says
-    const figure = document.createElement("figure");
-    figure.append(image, caption);
-    figure.addEventListener("click", () => wear(garment.i));
-    rack.appendChild(figure);
+  async function load() {
+    const answer = await fetch("/closet.json");
+    if (answer.status === 403) { location = "/"; return; }   // the cookie is gone: log in again
+    for (const garment of await answer.json()) {
+      const image = document.createElement("img");
+      image.src = "/thumb?i=" + garment.i;
+      const caption = document.createElement("figcaption");
+      caption.textContent = garment.name;   // textContent, never innerHTML, for anything the server says
+      const figure = document.createElement("figure");
+      figure.append(image, caption);
+      figure.addEventListener("click", () => wear(garment.i));
+      rack.appendChild(figure);
+    }
   }
-}
 
-// The index the list came with, never the name under it: the server looks up a
-// garment by position and so has no name off the network to turn into a path.
-async function wear(i) {
-  const response = await fetch("/pick?i=" + i, { method: "POST" });
-  statusLine.textContent = await response.text();
-}
+  // The index the list came with, never the name under it: the server looks up a
+  // garment by position and so has no name off the network to turn into a path.
+  async function wear(i) {
+    const response = await fetch("/pick?i=" + i, { method: "POST" });
+    statusLine.textContent = await response.text();
+  }
 
-load().catch(error => { statusLine.textContent = error.message; });
-</script>
+  load().catch(error => { statusLine.textContent = error.message; });
+  </script>
 </body>
 </html>

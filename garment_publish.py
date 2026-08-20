@@ -2,52 +2,39 @@
 Everything between a photo and a garment on the mirror.
 
 Takes bytes and a category, returns the line to tell the user - so it imports
-no Telegram and the whole pipeline runs from a command line.
+no server and the whole pipeline runs from a command line.
+
+Split in two because the anchor page happens in the middle: prepare() produces
+the cutout and a draft to drag around, finish() takes whatever anchors came
+back.
 
 Usage:
     python garment_publish.py photo.jpg shirt
 """
-import json
 import sys
-from pathlib import Path
 
-import cv2
-import numpy as np
-
-import auto_anchors
+import anchor_session
 import bg_remove
 import composite
-import config
 import garment_library
 import normalize
 from garment_types import RIG_BY_CATEGORY
 
 
-def publish(png: bytes, category: str, labels=None) -> str:
-    """Normalized PNG bytes onto the mirror. Returns what to reply."""
-    rig = RIG_BY_CATEGORY.get(category)
-    if rig is None:
-        return f"no such category {category!r} - pick one of {', '.join(RIG_BY_CATEGORY)}"
-    # Refuse at upload time rather than storing a garment that can never appear.
-    if rig != "top":
-        return f"{category} needs the bottom rig, and nothing finds bottom anchors yet"
+def prepare(png: bytes, category: str):
+    """Photo bytes to a cutout and the draft anchors to drag around."""
+    cutout = bg_remove.cutout(png)
+    sidecar = anchor_session.initial_sidecar(anchor_session.decode(cutout), category)
+    return cutout, sidecar
 
-    cut = bg_remove.cutout(png)
-    sidecar = auto_anchors.top_anchors(cv2.imdecode(np.frombuffer(cut, np.uint8), cv2.IMREAD_UNCHANGED))
-    if sidecar is None:
-        return "couldn't find the shoulders - try a flatter photo against a plain background"
 
-    # Garment reads an image path and derives its sidecar path from it, so both
-    # have to exist on disk, adjacent, sharing a stem. The category is the name,
-    # which is also why no string a user typed ever reaches a path.
-    directory = Path(config.BOT_GARMENT_DIR)
-    directory.mkdir(parents=True, exist_ok=True)
-    image_path = directory / f"{category}.png"
-    image_path.write_bytes(cut)
-    with open(image_path.with_suffix(".anchors.json"), "w") as f:
-        json.dump(sidecar, f, indent=2)
-
-    garment = garment_library.build(image_path)
+def finish(cutout: bytes, sidecar: dict, category: str, labels=None) -> str:
+    """A cutout and the anchors it ended up with, onto the mirror. Returns what to reply."""
+    # The upload never touches the disk: it is built straight from the two
+    # values it already is. The category is the name, which is also why no
+    # string a user typed ever reaches a path.
+    garment = garment_library.build_from_memory(
+        anchor_session.decode(cutout), sidecar, name=category)
     if labels is not None:
         # Before publishing, never after: the render loop reads the LUT with no guard.
         try:
@@ -62,5 +49,10 @@ if __name__ == "__main__":
     if len(sys.argv) != 3:
         sys.exit(f"Usage: python garment_publish.py photo.jpg [{'|'.join(RIG_BY_CATEGORY)}]")
 
+    category = sys.argv[2]
     with open(sys.argv[1], "rb") as f:
-        print(publish(normalize.to_png(f.read()), sys.argv[2]))
+        try:
+            cutout, sidecar = prepare(normalize.to_png(f.read()), category)
+            print(finish(cutout, sidecar, category))
+        except ValueError as e:
+            sys.exit(str(e))   # an unknown category or an empty cutout, in one line

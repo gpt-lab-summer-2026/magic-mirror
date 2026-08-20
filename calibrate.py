@@ -26,7 +26,7 @@ Bottoms (--bottom) - garment_overlay_bottom.POINT_NAMES_BOTTOM:
 The points past each list's core prefix are exactly the ones a sleeveless
 top or a skirt doesn't need — pressing s early only saves the points you
 actually clicked. What actually enforces "every point a garment's declared
-segments need must exist" is garment_rig.load_calibration at runtime, not
+segments need must exist" is garment_rig.check_calibration at runtime, not
 this file — so calibrate.py itself never needs to know which segments a
 garment ends up declaring.
 
@@ -58,40 +58,10 @@ import json
 from pathlib import Path
 
 import cv2
-import numpy as np
 
+from anchor_session import POINT_COLORS, composite_on_checkerboard
 from garment_overlay import POINT_NAMES, CORE_POINT_COUNT as CORE_POINT_COUNT_TOP
 from garment_overlay_bottom import POINT_NAMES_BOTTOM, CORE_POINT_COUNT as CORE_POINT_COUNT_BOTTOM
-
-# Cycled by point index - long enough for the longer of the two point sets
-# (bottoms, at 8), and wraps via modulo in calibrate() if that ever grows.
-POINT_COLORS = [
-    (0, 200, 255),    # orange
-    (255, 200, 0),    # cyan
-    (0, 255, 0),      # green
-    (255, 0, 255),    # magenta
-    (0, 128, 255),    # amber
-    (255, 255, 0),    # yellow
-    (128, 0, 255),    # purple
-    (0, 0, 255),      # red
-]
-
-
-def _composite_on_checkerboard(rgba, square=16):
-    """Composite onto a checkerboard so transparent edges are actually visible."""
-    h, w = rgba.shape[:2]
-    board = np.zeros((h, w, 3), dtype=np.uint8)
-    for y in range(0, h, square):
-        for x in range(0, w, square):
-            shade = 60 if ((x // square) + (y // square)) % 2 == 0 else 90
-            board[y:y + square, x:x + square] = (shade, shade, shade)
-
-    if rgba.shape[2] == 4:
-        rgb = rgba[:, :, :3].astype(np.float32)
-        alpha = rgba[:, :, 3:4].astype(np.float32) / 255.0
-        composited = rgb * alpha + board.astype(np.float32) * (1 - alpha)
-        return composited.astype(np.uint8)
-    return rgba[:, :, :3]
 
 
 def calibrate(image_path: str, point_names: list, core_count: int) -> dict:
@@ -99,7 +69,7 @@ def calibrate(image_path: str, point_names: list, core_count: int) -> dict:
     if rgba is None:
         raise FileNotFoundError(f"Could not read image: {image_path}")
 
-    display_base = _composite_on_checkerboard(rgba)
+    display_base = composite_on_checkerboard(rgba)
     points = []
 
     def on_mouse(event, x, y, flags, userdata):

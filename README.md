@@ -42,3 +42,26 @@ that link does not resolve it falls back to `CAMERA_INDEX`.
 The human parser needs a GPU — it runs at ~1.5 s per frame on CPU and starves
 the render loop, so without CUDA it is skipped. Everything else works; garments
 just draw over hands and bare arms instead of behind them.
+
+## Phone page
+
+Uploading a garment and placing its anchor points happens on a web page. The
+server binds to localhost, so a tunnel puts a public https URL in front of it:
+
+```bash
+winget install --id Cloudflare.cloudflared    # or: brew install cloudflared
+```
+
+`main.py` starts cloudflared itself and shows the URL it prints as a QR code in
+the corner of the mirror — scan it, type the password. With no cloudflared on
+PATH there is no QR code and no tunnel; the page is still at
+`http://127.0.0.1:8080` for a laptop.
+
+That URL changes every restart, which is why nothing stores it. A free
+Cloudflare account and a domain buy a *named* tunnel with a fixed one, and only
+the `cloudflared` command in [tunnel.py](tunnel.py) changes.
+
+**`GARMENT_BOT_PASSWORD` in `.env` has to be strong.** Everyone who can see the
+QR code has the URL, so the password is the only thing between them and the
+mirror. The server allows one guess a second, which a 4-digit PIN survives for
+under three hours and a three-word phrase survives for longer than the demo.

@@ -33,7 +33,7 @@ PyMatting==1.1.15
 pyparsing==3.3.2
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
-python-telegram-bot==22.8
+qrcode==8.2
 referencing==0.37.0
 rembg==2.0.77
 requests==2.34.2

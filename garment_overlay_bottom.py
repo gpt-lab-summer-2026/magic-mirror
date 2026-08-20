@@ -205,11 +205,12 @@ class GarmentBottom:
     each pixel sits closest to.
     """
 
-    def __init__(self, image_path: str):
-        self.rgba, self.anchors, self.occluders, self.segment_names = garment_rig.load_calibration(
-            image_path, POINT_NAMES_BOTTOM, SEGMENT_REQUIRED_POINTS,
+    def __init__(self, rgba, raw_anchors: dict, label: str):
+        self.rgba, self.anchors, self.occluders, self.segment_names = garment_rig.check_calibration(
+            rgba, raw_anchors, POINT_NAMES_BOTTOM, SEGMENT_REQUIRED_POINTS,
             occluder_hint='"occluders": ["shoes"] for anything the garment should draw over.',
             segments_hint='["seat", "left_upper_leg", "right_upper_leg"] for shorts.',
+            label=label,
         )
         self.segments = _build_bottom_segments(
             self.rgba, self.anchors, self.segment_names, SEGMENT_REQUIRED_POINTS, SEGMENT_JOINTS,

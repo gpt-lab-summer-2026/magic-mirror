@@ -84,11 +84,12 @@ PADDING_RATIO = 0.8
 class GarmentSkirt:
     """A background-removed skirt image plus its calibrated anchor points. No segments/partition - the whole image is one TPS-warped sheet."""
 
-    def __init__(self, image_path: str):
-        self.rgba, self.anchors, self.occluders, self.segment_names = garment_rig.load_calibration(
-            image_path, POINT_NAMES_SKIRT, SEGMENT_REQUIRED_POINTS,
+    def __init__(self, rgba, raw_anchors: dict, label: str):
+        self.rgba, self.anchors, self.occluders, self.segment_names = garment_rig.check_calibration(
+            rgba, raw_anchors, POINT_NAMES_SKIRT, SEGMENT_REQUIRED_POINTS,
             occluder_hint='"occluders": ["shoes"] for anything the garment should draw over.',
             segments_hint='["seat"] - a skirt only ever declares this one segment.',
+            label=label,
         )
 
 

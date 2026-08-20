@@ -8,9 +8,6 @@ stay the only place that says "torso" or "left_upper_leg".
 Only the per-body-region config (which points, which segments, which joints) 
 differ in garment_overlay.py and garment_overlay_bottom.py.
 """
-import json
-from pathlib import Path
-
 import cv2
 import numpy as np
 
@@ -162,38 +159,31 @@ class LandmarkSmoother:
         self._smoothed = {}
 
 
-def load_calibration(image_path: str, point_names: list, segment_required_points: dict,
-                      occluder_hint: str, segments_hint: str):
+def check_calibration(rgba: np.ndarray, raw_anchors: dict, point_names: list,
+                      segment_required_points: dict, occluder_hint: str,
+                      segments_hint: str, label: str):
     """
-    Load a garment's RGBA image and its calibrated <name>.anchors.json,
-    validating both against point_names/segment_required_points. Raises
-    FileNotFoundError/ValueError with a message pointing at calibrate.py on
-    any problem. Returns (rgba, anchors, occluders, segment_names).
+    Check an already-read garment image and sidecar against
+    point_names/segment_required_points. Raises ValueError on any problem.
+    Returns (rgba, anchors, occluders, segment_names).
+
+    Values, not files: a garment read from garments/ and one uploaded from a
+    phone are the same two values by the time they arrive here, so this is
+    the one place either is checked. label only names the garment in the
+    error messages.
 
     occluder_hint/segments_hint are the body-region-specific example text
     for the two calibration keys calibrate.py doesn't write itself.
     """
-    rgba = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
-    if rgba is None:
-        raise FileNotFoundError(f"Could not read garment image: {image_path}")
     if rgba.ndim != 3 or rgba.shape[2] != 4:
-        raise ValueError(f"Garment image must have an alpha channel (RGBA): {image_path}")
-
-    anchors_path = str(Path(image_path).with_suffix("")) + ".anchors.json"
-    if not Path(anchors_path).exists():
-        raise FileNotFoundError(
-            f"No calibration found for {image_path}. "
-            f"Run: python calibrate.py {image_path}"
-        )
-    with open(anchors_path) as f:
-        raw_anchors = json.load(f)
+        raise ValueError(f"Garment image must have an alpha channel (RGBA): {label}")
 
     # calibrate.py does not write this key, so a newly calibrated garment has
     # to have one added by hand. Deliberate: defaulting it would let a hidden
     # body part silently show through the fabric.
     if "occluders" not in raw_anchors:
         raise ValueError(
-            f"Calibration file for {image_path} has no \"occluders\" list. Add e.g. "
+            f'{label} has no "occluders" list. Add e.g. '
             f'{occluder_hint}'
         )
 
@@ -201,14 +191,14 @@ def load_calibration(image_path: str, point_names: list, segment_required_points
     # part steals fabric down its side and flies it off on the wearer's limb.
     if "segments" not in raw_anchors:
         raise ValueError(
-            f'Calibration file for {image_path} has no "segments" list. Add the parts '
+            f'{label} has no "segments" list. Add the parts '
             f'this garment actually covers, e.g. {segments_hint} '
             f'Valid names: {", ".join(segment_required_points)}'
         )
     unknown = [s for s in raw_anchors["segments"] if s not in segment_required_points]
     if unknown:
         raise ValueError(
-            f"Calibration file for {image_path} lists unknown segments {unknown}. "
+            f"{label} lists unknown segments {unknown}. "
             f'Valid names: {", ".join(segment_required_points)}'
         )
 
@@ -220,9 +210,8 @@ def load_calibration(image_path: str, point_names: list, segment_required_points
     missing = [name for name in needed_points if name not in raw_anchors]
     if missing:
         raise ValueError(
-            f"Calibration file for {image_path} declares segments {raw_anchors['segments']} "
-            f"but is missing the points they need: {missing}. "
-            f"Re-run: python calibrate.py {image_path}"
+            f"{label} declares segments {raw_anchors['segments']} "
+            f"but is missing the points they need: {missing}"
         )
 
     anchors = {name: np.float32(raw_anchors[name]) for name in point_names if name in raw_anchors}

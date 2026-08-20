@@ -36,6 +36,6 @@ POSE_MODEL = "pose_landmarker_full.task"
 PARSER_EVERY_N = 1
 GARMENT_DIR = "garments"   # scanned by garment_library.py in C2; nothing reads it yet
 
-# Uploads land here, never beside the hand-calibrated demos: a bad one is then
-# one folder to wipe, and it can never evict a garment that was clicked by hand.
-BOT_GARMENT_DIR = "bot-garments"
+# The anchor page's local server. Localhost only, so the cloudflared tunnel is
+# the only way to it; the tunnel is pointed at this port and nothing else is.
+ANCHOR_APP_PORT = 8080

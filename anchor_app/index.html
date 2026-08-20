@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Magic mirror</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; height: 100vh; height: 100dvh; padding: 16px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+    font: 14px/1.4 system-ui, sans-serif;
+    background: #17212b;
+    color: #f5f5f5;
+  }
+  input, button {
+    width: 100%; max-width: 320px; padding: 11px; border: 0; border-radius: 8px; font: inherit;
+  }
+  button { background: #2ea6ff; color: #ffffff; }
+  #statusLine { margin: 0; min-height: 1.4em; font-size: 12px; opacity: 0.75; }
+</style>
+</head>
+<body>
+<input id="password" type="password" autocomplete="current-password" placeholder="password" autofocus>
+<button id="enter">Enter</button>
+<p id="statusLine"></p>
+
+<script>
+const password = document.getElementById("password");
+const statusLine = document.getElementById("statusLine");
+
+// In the body, never in the URL: a query string ends up in the phone's history
+// and in every log between here and there. The reply sets the cookie that every
+// other page and request is checked against, and this is the only time the
+// password is sent at all.
+async function login() {
+  const response = await fetch("/login", { method: "POST", body: password.value });
+  if (response.ok) location = "/map";
+  else statusLine.textContent = "wrong password";
+}
+
+document.getElementById("enter").addEventListener("click", login);
+password.addEventListener("keydown", event => { if (event.key === "Enter") login(); });
+</script>
+</body>
+</html>

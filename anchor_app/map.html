@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Place the points</title>
 <style>
-  :root { color-scheme: dark; }
+  :root { color-scheme: light dark; }
   * { box-sizing: border-box; }
   body {
     /* dvh first, vh for the browsers that don't know it: 100vh on a phone is
@@ -13,15 +13,15 @@
     margin: 0; height: 100vh; height: 100dvh; overflow: hidden;
     display: flex; flex-direction: column;
     font: 14px/1.4 system-ui, sans-serif;
-    background: #17212b;
-    color: #f5f5f5;
+    background-color: light-dark(#ffc9ed, #17212b);
+    color: light-dark(#6b1a50, #f5f5f5);
   }
   #note, #statusLine { margin: 0; padding: 5px 10px; font-size: 16px; opacity: 0.75; }
   nav { padding: 8px 8px 0; }
   nav a {
     display: block; padding: 11px; border-radius: 8px; text-align: center; text-decoration: none;
-    background: #24384a;
-    color: #f5f5f5;
+    background-color: light-dark(#f5f5f5, #24384a);
+    color: light-dark(#6b1a50, #f5f5f5);
   }
   /* main and footer are display:flex, which outranks the browser's own [hidden] rule. */
   [hidden] { display: none !important; }
@@ -41,7 +41,7 @@
   #intake { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
   footer button, #categories button {
     flex: 1; padding: 11px; border: 0; border-radius: 8px; font: inherit;
-    background: #2ea6ff;
+    background-color: light-dark(#6b1a50, #1a73e8);
     color: #ffffff;
   }
   footer button:disabled { opacity: 0.4; }

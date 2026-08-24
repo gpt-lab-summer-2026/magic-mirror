@@ -2,6 +2,8 @@ import sys
 from pathlib import Path
 from rembg import remove, new_session
 
+import normalize
+
 _session = None
 
 
@@ -28,7 +30,7 @@ def remove_background_from_image(input_path, output_path):
     with open(input_path, 'rb') as i:
         data = i.read()
     with open(output_path, 'wb') as o:
-        o.write(cutout(data))
+        o.write(cutout(normalize.to_png(data)))
 
     return output_path
 

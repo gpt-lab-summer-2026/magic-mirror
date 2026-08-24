@@ -13,7 +13,7 @@ import sys
 import pillow_heif
 from PIL import Image, ImageOps
 
-MAX_EDGE = 1600   # above this, every contour bump grows its own skeleton twig
+MAX_EDGE = 1000   # above this, every contour bump grows its own skeleton twig
 
 # What a camera roll actually holds. Pillow opens some thirty formats - FITS,
 # GRIB, EPS - and each one is more C code for a malformed file to go after,

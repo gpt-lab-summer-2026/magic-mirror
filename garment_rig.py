@@ -25,7 +25,7 @@ RIGHT_KNEE = 26
 LEFT_ANKLE = 27
 RIGHT_ANKLE = 28
 
-MIN_VISIBILITY = 0.5
+MIN_VISIBILITY = 0.65
 
 # How far each segment's mask extends past its base (nearest-line)
 # boundary at a shared joint, as a multiple of that segment's own typical
@@ -101,6 +101,27 @@ def fit_similarity_transform(src_pts: np.ndarray, dst_pts: np.ndarray) -> np.nda
     src_pts = np.asarray(src_pts, dtype=np.float64)
     dst_pts = np.asarray(dst_pts, dtype=np.float64)
     n = src_pts.shape[0]
+
+    if n == 2:
+        # Umeyama's reflection-correction step (below) inspects the sign of
+        # det(Sigma)/det(U)*det(Vt) to decide whether the fit is a proper
+        # rotation or a mirror. With only 2 points Sigma is exactly rank-1,
+        # so that determinant is pure floating-point noise around zero,
+        # causing random mirroring glitches in limbs. Two points fully 
+        # determine rotation + scale on their own, so compute that directly 
+        # instead of going through the SVD.
+        v_src, v_dst = src_pts[1] - src_pts[0], dst_pts[1] - dst_pts[0]
+        len_src, len_dst = np.linalg.norm(v_src), np.linalg.norm(v_dst)
+        if len_src < 1e-9:
+            t = dst_pts[0] - src_pts[0]
+            return np.array([[1, 0, t[0]], [0, 1, t[1]]], dtype=np.float32)
+        c = len_dst / len_src
+        angle = np.arctan2(v_dst[1], v_dst[0]) - np.arctan2(v_src[1], v_src[0])
+        cos_a, sin_a = np.cos(angle), np.sin(angle)
+        R = np.array([[cos_a, -sin_a], [sin_a, cos_a]])
+        t = dst_pts[0] - c * (R @ src_pts[0])
+        return np.hstack([c * R, t.reshape(2, 1)]).astype(np.float32)
+
     mu_src, mu_dst = src_pts.mean(axis=0), dst_pts.mean(axis=0)
     src_c, dst_c = src_pts - mu_src, dst_pts - mu_dst
     var_src = (src_c ** 2).sum() / n
@@ -121,10 +142,7 @@ def fit_similarity_transform(src_pts: np.ndarray, dst_pts: np.ndarray) -> np.nda
 def fit_affine_transform(src_pts: np.ndarray, dst_pts: np.ndarray) -> np.ndarray:
     """
     Full affine (independent x/y scale + shear allowed) from exactly 3
-    points — an exact solve, unlike similarity. Used for the torso, where 
-    orcing one uniform scale across both the shoulder-width and shoulder-to-hip 
-    directions was causing it to shrink whenever the live body's proportions
-    didn't exactly match the calibration photo's.
+    points — an exact solve, unlike similarity. Used for the torso.
     """
     return cv2.getAffineTransform(
         np.asarray(src_pts, dtype=np.float32),
@@ -140,7 +158,7 @@ class LandmarkSmoother:
     independently against its own history.
     """
 
-    def __init__(self, alpha: float = 0.4):
+    def __init__(self, alpha: float = 0.2):
         self.alpha = alpha
         self._smoothed = {}
 
@@ -277,7 +295,7 @@ def build_segments(rgba: np.ndarray, anchors: dict, segment_names: list,
         seg_mask = seg_masks[name].reshape(h, w)
         ys_idx, xs_idx = np.where(seg_mask)
         if len(xs_idx) == 0:
-            segments[name] = None  # nothing assigned to this segment — skip it at runtime
+            segments[name] = None  # nothing assigned to this segment — skip at runtime
             continue
         x0, y0 = int(xs_idx.min()), int(ys_idx.min())
         x1, y1 = int(xs_idx.max()) + 1, int(ys_idx.max()) + 1
@@ -299,7 +317,7 @@ def _composite_segment_over(canvas_premult, canvas_alpha, seg_rgba, bbox, M):
     rigid transform M, and alpha-composite it "over" the accumulated
     canvas at the right location, clipped to the canvas bounds.
 
-    Returns the canvas rect it wrote to, or None if it wrote nothing.
+    Returns the canvas rect it wrote to, or None if wrote nothing.
     """
     frame_h, frame_w = canvas_alpha.shape[:2]
     x0, y0, x1, y1 = bbox
@@ -386,8 +404,8 @@ def warp_and_blend(frame_bgr: np.ndarray, segments: dict, named_dst_points: dict
     """
     Warp each segment (whichever have all their required live points
     currently tracked) with its own rigid transform, layering them in
-    segment_draw_order, then alpha-blend the result onto frame_bgr. Returns
-    a new frame; does not mutate frame_bgr.
+    segment_draw_order, then alpha-blend the result onto frame_bgr. 
+    Returns a new frame; does not mutate frame_bgr.
 
     segment_transform_kind: {name: "affine"} for segments that need the full
     affine fit (e.g. the torso); every other/missing name uses similarity.

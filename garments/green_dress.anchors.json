@@ -1,0 +1,22 @@
+{
+  "left_shoulder": [
+    409,
+    137
+  ],
+  "right_shoulder": [
+    146,
+    141
+  ],
+  "hip_center": [
+    281,
+    514
+  ],
+  "segments": [
+    "torso"
+  ],
+  "occluders": [
+    "hands",
+    "face",
+    "hair"
+  ]
+}

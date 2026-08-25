@@ -61,9 +61,14 @@ def decode(png: bytes):
 
 
 def points_for(category: str):
-    """The category's point names, and how many of them are core."""
+    """The category's point names, and how many of them are core.
+
+    A skirt shares the bottom rig but is offered its core points alone: it has
+    no leg seam, and a knee placed on one would now build a leg segment out of
+    fabric that is a single sheet.
+    """
     names, core, _ = RIGS[RIG_BY_CATEGORY[category]]
-    return names, core
+    return (names[:core] if category == "skirt" else names), core
 
 
 def points_of(sidecar: dict):
@@ -202,7 +207,8 @@ def validate(data: str, draft: dict, category: str, width: int, height: int) -> 
     if not isinstance(sent, dict):
         raise ValueError("that didn't look like anchors - open the page again")
 
-    names, core, segment_needs = RIGS[RIG_BY_CATEGORY[category]]
+    names, core = points_for(category)
+    segment_needs = RIGS[RIG_BY_CATEGORY[category]][2]
     unknown = [name for name in sent if name not in names]
     if unknown:
         raise ValueError(f"a {category} has no {', '.join(unknown)}")
@@ -216,15 +222,16 @@ def validate(data: str, draft: dict, category: str, width: int, height: int) -> 
         if not (0 <= value[0] < width and 0 <= value[1] < height):
             raise ValueError(f"{name} landed outside the image")
 
-    # A segment whose points were switched off is one this garment can no longer
-    # wear: the rule check_calibration enforces at load time, applied here where
-    # there is still somebody to tell. A top left with no sleeve points comes out
-    # of it as ["torso"], which is what makes it sleeveless - so its bare arms
-    # get repainted, exactly as auto_anchors does for a sleeveless measurement.
-    segments = [s for s in draft["segments"] if all(p in sent for p in segment_needs[s])]
+    # Read off the taps, not off the draft. auto_anchors regularly misses a
+    # sleeve, and filtering its list meant a placed wrist could never bring the
+    # forearm back: the whole sleeve then rode on the shoulder-to-elbow bone
+    # alone and came out about twice too long.
+    segments = [s for s in segment_needs if all(p in sent for p in segment_needs[s])]
     occluders = draft["occluders"]
-    if category == "shirt" and segments == ["torso"]:
-        occluders = BASE_OCCLUDERS + ["arms"]
+    if category == "shirt":
+        # Both directions: a sleeve placed here has to clear an "arms" the draft
+        # added, or the bare arms get repainted over the sleeve just rescued.
+        occluders = BASE_OCCLUDERS + ["arms"] if segments == ["torso"] else BASE_OCCLUDERS
     return _sidecar(sent, names, segments, occluders)
 
 

@@ -11,7 +11,7 @@ import os
 CAMERA_BY_ID = "/dev/v4l/by-id/usb-SHENZHEN_AONI_ELECTRONIC_CO._LTD_UHD_4K_Camera_N20200814003-video-index0"
 
 # Used wherever that link does not resolve - any other machine, and Windows.
-CAMERA_INDEX = 0
+CAMERA_INDEX = 1
 
 # The link resolves on the demo machine and nowhere else, so it answers both
 # questions at once: which camera to open, and whether the screen is the

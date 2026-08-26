@@ -36,6 +36,12 @@
     background-color: light-dark(#f5f5f5, #3c3c3c);
   }
   figcaption { padding-top: 4px; text-align: center; }
+  /* Landscape: the screen is too short to hold nav + rack + status, so let the
+     page itself scroll instead of clipping what does not fit. */
+  @media (max-height: 520px) {
+    body { height: auto; min-height: 100dvh; overflow: auto; }
+    #rack { overflow-y: visible; }
+  }
 </style>
 </head>
 <body>

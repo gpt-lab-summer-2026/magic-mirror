@@ -1,22 +1,21 @@
 {
   "left_shoulder": [
-    451,
-    80
+    409,
+    137
   ],
   "right_shoulder": [
-    215,
-    88
+    146,
+    141
   ],
   "hip_center": [
-    335,
-    467
+    281,
+    514
   ],
   "segments": [
     "torso"
   ],
   "occluders": [
     "hands",
-    "arms",
     "face",
     "hair"
   ]

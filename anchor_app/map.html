@@ -45,6 +45,12 @@
     color: #ffffff;
   }
   footer button:disabled { opacity: 0.4; }
+  /* Landscape: the screen is too short to hold the canvas and the buttons at
+     once, so the page scrolls and the stage keeps a height to scale into. */
+  @media (max-height: 520px) {
+    body { height: auto; min-height: 100dvh; overflow: auto; }
+    main { flex: none; height: 70vw; }
+  }
 </style>
 </head>
 <body>

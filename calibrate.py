@@ -63,11 +63,18 @@ from anchor_session import POINT_COLORS, composite_on_checkerboard
 from garment_overlay import POINT_NAMES, CORE_POINT_COUNT as CORE_POINT_COUNT_TOP
 from garment_overlay_bottom import POINT_NAMES_BOTTOM, CORE_POINT_COUNT as CORE_POINT_COUNT_BOTTOM
 
+# normalize.py caps the long edge
+MAX_WINDOW_HEIGHT = 950
+
 
 def calibrate(image_path: str, point_names: list, core_count: int) -> dict:
     rgba = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
     if rgba is None:
         raise FileNotFoundError(f"Could not read image: {image_path}")
+
+    scale = min(1.0, MAX_WINDOW_HEIGHT / rgba.shape[0])
+    if scale < 1.0:
+        rgba = cv2.resize(rgba, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
 
     display_base = composite_on_checkerboard(rgba)
     points = []
@@ -113,7 +120,8 @@ def calibrate(image_path: str, point_names: list, core_count: int) -> dict:
 
     cv2.destroyAllWindows()
 
-    return {name: list(pt) for name, pt in zip(point_names, points)}
+    return {name: [round(x / scale), round(y / scale)]
+            for name, (x, y) in zip(point_names, points)}
 
 
 def save_anchors(image_path: str, anchors: dict) -> str:

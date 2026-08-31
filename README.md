@@ -1,4 +1,6 @@
-# magic-mirror
+# Magic Mirror
+
+Is choosing what to wear difficult? Have you ever wanted to try on a piece of clothing from a friend or a shop without having to actually get the item? Magic Mirror solves these problems for you! Try on any of the pre-uploaded garments, or add your own by taking a picture of it and clicking the focus points. Magic Mirror is a VTON (Virtual Try-On) program, where the wearer's body is tracked with Google's MediaPipe and the garments snap onto the MediaPipe skeleton.  
 
 ## Setup
 
